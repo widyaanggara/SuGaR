@@ -230,10 +230,10 @@ def refined_training(args):
     # ====================End of parameters====================
 
     if args.output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.output_dir = os.path.join("./output/refined", args.scene_path.split("/")[-1])
-        else:
-            args.output_dir = os.path.join("./output/refined", args.scene_path.split("/")[-2])
+        norm_scene = os.path.normpath(args.scene_path).replace('\\', '/').rstrip('/')
+        scene_parts = [p for p in norm_scene.split('/') if p]
+        scene_name = scene_parts[-1] if scene_parts else 'scene'
+        args.output_dir = os.path.join("./output/refined", scene_name)
             
     # Bounding box
     if (args.bboxmin is None) or (args.bboxmin == 'None'):
@@ -260,7 +260,10 @@ def refined_training(args):
     source_path = args.scene_path
     gs_checkpoint_path = args.checkpoint_path
     surface_mesh_to_bind_path = args.mesh_path
-    mesh_name = surface_mesh_to_bind_path.split("/")[-1].split(".")[0]
+    norm_mesh_path = os.path.normpath(surface_mesh_to_bind_path).replace('\\', '/').rstrip('/')
+    mesh_parts = [p for p in norm_mesh_path.split('/') if p]
+    mesh_filename = mesh_parts[-1] if mesh_parts else 'mesh'
+    mesh_name = mesh_filename.split(".")[0]
     iteration_to_load = args.iteration_to_load    
     
     surface_mesh_normal_consistency_factor = args.normal_consistency_factor    
@@ -878,12 +881,11 @@ def refined_training(args):
     if export_ply_at_the_end:
         # Build path
         CONSOLE.print("\nExporting ply file with refined Gaussians...")
-        tmp_list = model_path.split(os.sep)
-        tmp_list[-4] = 'refined_ply'
-        tmp_list.pop(-1)
-        tmp_list[-1] = tmp_list[-1] + '.ply'
-        refined_ply_save_dir = os.path.join(*tmp_list[:-1])
-        refined_ply_save_path = os.path.join(*tmp_list)
+        norm_model_path = os.path.normpath(model_path)
+        sugar_dir = os.path.dirname(norm_model_path)
+        parent_output = os.path.dirname(sugar_dir)
+        refined_ply_save_dir = os.path.join(parent_output, 'refined_ply')
+        refined_ply_save_path = os.path.join(refined_ply_save_dir, os.path.basename(sugar_dir) + '.ply')
         
         os.makedirs(refined_ply_save_dir, exist_ok=True)
         

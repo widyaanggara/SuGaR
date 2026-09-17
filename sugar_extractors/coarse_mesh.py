@@ -68,11 +68,12 @@ def extract_mesh_from_coarse_sugar(args):
         decimation_targets = [args.decimation_target]
     
     # Mesh output dir
+    norm_scene = os.path.normpath(args.scene_path).replace('\\', '/').rstrip('/')
+    scene_parts = [p for p in norm_scene.split('/') if p]
+    scene_name = scene_parts[-1] if scene_parts else 'scene'
+
     if args.mesh_output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.mesh_output_dir = os.path.join("./output/coarse_mesh", args.scene_path.split("/")[-1])
-        else:
-            args.mesh_output_dir = os.path.join("./output/coarse_mesh", args.scene_path.split("/")[-2])
+        args.mesh_output_dir = os.path.join("./output/coarse_mesh", scene_name)
     mesh_output_dir = args.mesh_output_dir
     os.makedirs(mesh_output_dir, exist_ok=True)
             
@@ -507,10 +508,14 @@ def extract_mesh_from_coarse_sugar(args):
                         decimated_o3d_mesh.remove_non_manifold_edges()
                         CONSOLE.print("Projection done.")
                     
+                    norm_coarse = os.path.normpath(sugar_checkpoint_path).replace('\\', '/').rstrip('/')
+                    coarse_parts = [p for p in norm_coarse.split('/') if p]
+                    coarse_name = coarse_parts[-1] if coarse_parts else 'sugarcoarse'
+
                     if use_vanilla_3dgs:
                         sugar_mesh_path = 'sugarmesh_vanilla3dgs_levelZZ_decimAA.ply'
                     else:
-                        sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_levelZZ_decimAA.ply'
+                        sugar_mesh_path = 'sugarmesh_' + coarse_name.replace('sugarcoarse_', '') + '_levelZZ_decimAA.ply'
                     sugar_mesh_path = sugar_mesh_path.replace(
                         'ZZ', str(surface_level).replace('.', '')
                         ).replace(
@@ -642,10 +647,14 @@ def extract_mesh_from_coarse_sugar(args):
                     else:
                         decimated_o3d_mesh = decimated_o3d_fg_mesh
                     
+                    norm_coarse = os.path.normpath(sugar_checkpoint_path).replace('\\', '/').rstrip('/')
+                    coarse_parts = [p for p in norm_coarse.split('/') if p]
+                    coarse_name = coarse_parts[-1] if coarse_parts else 'sugarcoarse'
+
                     if use_vanilla_3dgs:
                         sugar_mesh_path = 'sugarmesh_vanilla3dgs_poissoncenters_decimAA.ply'
                     else:
-                        sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_poissoncenters_decimAA.ply'
+                        sugar_mesh_path = 'sugarmesh_' + coarse_name.replace('sugarcoarse_', '') + '_poissoncenters_decimAA.ply'
                     sugar_mesh_path = sugar_mesh_path.replace(
                             'AA', str(decimation_target).replace('.', '')
                             )
@@ -775,10 +784,14 @@ def extract_mesh_from_coarse_sugar(args):
             decimated_o3d_bg_mesh.remove_non_manifold_edges()
             
         decimated_o3d_mesh = decimated_o3d_fg_mesh + decimated_o3d_bg_mesh
+        norm_coarse = os.path.normpath(sugar_checkpoint_path).replace('\\', '/').rstrip('/')
+        coarse_parts = [p for p in norm_coarse.split('/') if p]
+        coarse_name = coarse_parts[-1] if coarse_parts else 'sugarcoarse'
+
         if use_vanilla_3dgs:
-            sugar_mesh_path = 'sugarmesh_vanilla3dgsmarchingcubes_levelZZ_decimAA.ply'
+            sugar_mesh_path = 'sugarmesh_vanilla3dgs_marchingcubes_levelZZ_decimAA.ply'
         else:
-            sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + 'marchingcubes_levelZZ_decimAA.ply'
+            sugar_mesh_path = 'sugarmesh_' + coarse_name.replace('sugarcoarse_', '') + 'marchingcubes_levelZZ_decimAA.ply'
         sugar_mesh_path = sugar_mesh_path.replace(
             'ZZ', str(surface_level).replace('.', '')
             ).replace(

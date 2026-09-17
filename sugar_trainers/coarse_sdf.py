@@ -226,10 +226,10 @@ def coarse_training_with_sdf_regularization(args):
     # ====================End of parameters====================
 
     if args.output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.output_dir = os.path.join("./output/coarse", args.scene_path.split("/")[-1])
-        else:
-            args.output_dir = os.path.join("./output/coarse", args.scene_path.split("/")[-2])
+        norm_scene = os.path.normpath(args.scene_path).replace('\\', '/').rstrip('/')
+        scene_parts = [p for p in norm_scene.split('/') if p]
+        scene_name = scene_parts[-1] if scene_parts else 'scene'
+        args.output_dir = os.path.join("./output/coarse", scene_name)
             
     source_path = args.scene_path
     gs_checkpoint_path = args.checkpoint_path

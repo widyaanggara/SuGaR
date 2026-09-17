@@ -22,35 +22,39 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     
     # --- Vanilla 3DGS parameters ---
     iteration_to_load = args.iteration_to_load
-    gs_checkpoint_path = args.checkpoint_path
-    if gs_checkpoint_path[-1] != os.sep:
-        gs_checkpoint_path = gs_checkpoint_path + os.sep
+    gs_checkpoint_path = os.path.normpath(args.checkpoint_path)
+    if not gs_checkpoint_path.endswith(os.sep):
+        gs_checkpoint_path += os.sep
     
     # --- Fine model parameters ---
     refined_model_path = args.refined_model_path
+    norm_refined_path = os.path.normpath(refined_model_path).replace('\\', '/').rstrip('/')
+    refined_parts = [p for p in norm_refined_path.split('/') if p]
+    refined_folder_name = refined_parts[-1] if refined_parts else 'model'
+
     if args.n_gaussians_per_surface_triangle is None:
-        n_gaussians_per_surface_triangle = int(refined_model_path.split('/')[-2].split('_gaussperface')[-1])
+        n_gaussians_per_surface_triangle = int(refined_folder_name.split('_gaussperface')[-1])
     else:
         n_gaussians_per_surface_triangle = args.n_gaussians_per_surface_triangle
     
     # --- Output parameters ---
+    norm_source = os.path.normpath(args.scene_path).replace('\\', '/').rstrip('/')
+    source_parts = [p for p in norm_source.split('/') if p]
+    scene_name = source_parts[-1] if source_parts else 'scene'
+
     if args.mesh_output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.mesh_output_dir = os.path.join("./output/refined_mesh", args.scene_path.split("/")[-1])
-        else:
-            args.mesh_output_dir = os.path.join("./output/refined_mesh", args.scene_path.split("/")[-2])
+        args.mesh_output_dir = os.path.join("./output/refined_mesh", scene_name)
     mesh_output_dir = args.mesh_output_dir
     os.makedirs(mesh_output_dir, exist_ok=True)
     
-    mesh_save_path = refined_model_path.split('/')[-2]
+    mesh_save_path = refined_folder_name
     if args.postprocess_mesh:
         mesh_save_path = mesh_save_path + '_postprocessed'
     mesh_save_path = mesh_save_path + '.obj'
     mesh_save_path = os.path.join(mesh_output_dir, mesh_save_path)
     
-    scene_name = source_path.split('/')[-2] if len(source_path.split('/')[-1]) == 0 else source_path.split('/')[-1]
     sugar_mesh_path = os.path.join('./output/coarse_mesh/', scene_name, 
-                                refined_model_path.split('/')[-2].split('_normalconsistency')[0].replace('sugarfine', 'sugarmesh') + '.ply')
+                                refined_folder_name.split('_normalconsistency')[0].replace('sugarfine', 'sugarmesh') + '.ply')
     
     if args.square_size is None:
         if n_gaussians_per_surface_triangle == 1:

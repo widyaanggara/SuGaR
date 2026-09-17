@@ -107,55 +107,74 @@ if __name__ == "__main__":
     if args.export_ply:
         print('Will export a ply file with the refined 3D Gaussians at the end of the training.')
         
+    import subprocess
+    import sys
+
     # Output directory for the vanilla 3DGS checkpoint
+    norm_scene = os.path.normpath(args.scene_path).replace('\\', '/').rstrip('/')
+    scene_parts = [p for p in norm_scene.split('/') if p]
+    scene_name = scene_parts[-1] if scene_parts else 'scene'
+
     if args.gs_output_dir is None:
-        sep = os.path.sep
-        if len(args.scene_path.split(sep)[-1]) > 0:
-            gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-1])
-        else:
-            gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-2])
-        gs_checkpoint_dir = gs_checkpoint_dir + sep
+        gs_checkpoint_dir = os.path.join("output", "vanilla_gs", scene_name)
+        if not gs_checkpoint_dir.endswith(os.path.sep):
+            gs_checkpoint_dir += os.path.sep
 
         # Trains a 3DGS scene for 7k iterations
-        white_background_str = '-w ' if args.white_background else ''
-        os.system(
-            f"CUDA_VISIBLE_DEVICES={args.gpu} python ./gaussian_splatting/train.py \
-                -s {args.scene_path} \
-                -m {gs_checkpoint_dir} \
-                {white_background_str}\
-                --iterations 7_000"
-        )
+        train_gs_cmd = [
+            sys.executable, "./gaussian_splatting/train.py",
+            "-s", str(args.scene_path),
+            "-m", str(gs_checkpoint_dir),
+            "--iterations", "7000"
+        ]
+        if args.white_background:
+            train_gs_cmd.append("-w")
+
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+
+        print(f"Running 3DGS 7k training: {' '.join(train_gs_cmd)}")
+        subprocess.run(train_gs_cmd, env=env, check=True)
     else:
         print("A vanilla 3DGS checkpoint was provided. Skipping the vanilla 3DGS optimization.")
         gs_checkpoint_dir = args.gs_output_dir
-        if gs_checkpoint_dir[-1] != os.path.sep:
+        if not gs_checkpoint_dir.endswith(os.path.sep):
             gs_checkpoint_dir += os.path.sep
     
     # Runs the train.py python script with the given arguments
-    os.system(
-        f"python train.py \
-            -s {args.scene_path} \
-            -c {gs_checkpoint_dir} \
-            -i 7_000 \
-            -r {args.regularization_type} \
-            -l {args.surface_level} \
-            -v {args.n_vertices_in_mesh} \
-            --project_mesh_on_surface_points {args.project_mesh_on_surface_points} \
-            -g {args.gaussians_per_triangle} \
-            -f {args.refinement_iterations} \
-            --bboxmin {args.bboxmin} \
-            --bboxmax {args.bboxmax} \
-            --center_bbox {args.center_bbox} \
-            -t {args.export_obj} \
-            --square_size {args.square_size} \
-            --postprocess_mesh {args.postprocess_mesh} \
-            --postprocess_density_threshold {args.postprocess_density_threshold} \
-            --postprocess_iterations {args.postprocess_iterations} \
-            --export_ply {args.export_ply} \
-            --low_poly {args.low_poly} \
-            --high_poly {args.high_poly} \
-            --refinement_time {args.refinement_time} \
-            --eval {args.eval} \
-            --gpu {args.gpu} \
-            --white_background {args.white_background}"
-    )
+    train_sugar_cmd = [
+        sys.executable, "train.py",
+        "-s", str(args.scene_path),
+        "-c", str(gs_checkpoint_dir),
+        "-i", "7000",
+        "-r", str(args.regularization_type),
+        "-l", str(args.surface_level),
+        "-v", str(args.n_vertices_in_mesh),
+        "--project_mesh_on_surface_points", str(args.project_mesh_on_surface_points),
+        "-g", str(args.gaussians_per_triangle),
+        "-f", str(args.refinement_iterations),
+        "-t", str(args.export_obj),
+        "--square_size", str(args.square_size),
+        "--postprocess_mesh", str(args.postprocess_mesh),
+        "--postprocess_density_threshold", str(args.postprocess_density_threshold),
+        "--postprocess_iterations", str(args.postprocess_iterations),
+        "--export_ply", str(args.export_ply),
+        "--low_poly", str(args.low_poly),
+        "--high_poly", str(args.high_poly),
+        "--eval", str(args.eval),
+        "--gpu", str(args.gpu),
+        "--white_background", str(args.white_background),
+        "--center_bbox", str(args.center_bbox),
+    ]
+    if args.bboxmin is not None and args.bboxmin != 'None':
+        train_sugar_cmd.extend(["--bboxmin", str(args.bboxmin)])
+    if args.bboxmax is not None and args.bboxmax != 'None':
+        train_sugar_cmd.extend(["--bboxmax", str(args.bboxmax)])
+    if args.refinement_time is not None:
+        train_sugar_cmd.extend(["--refinement_time", str(args.refinement_time)])
+
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+
+    print(f"Running SuGaR training: {' '.join(train_sugar_cmd)}")
+    subprocess.run(train_sugar_cmd, env=env, check=True)

@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Reconstruction Pipeline — 3DGS vs SuGaR</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+    :root {
+      --bg-0: #09090b;
+      --bg-1: #0f0f12;
+      --bg-2: #18181b;
+      --bg-3: #1e1e22;
+      --bg-4: #27272a;
+      --border: #27272a;
+      --border-hover: #3f3f46;
+      --text-0: #fafafa;
+      --text-1: #d4d4d8;
+      --text-2: #a1a1aa;
+      --text-3: #71717a;
+      --text-4: #52525b;
+      --blue: #3b82f6;
+      --blue-dim: rgba(59,130,246,0.12);
+      --green: #22c55e;
+      --green-dim: rgba(34,197,94,0.12);
+      --amber: #f59e0b;
+      --amber-dim: rgba(245,158,11,0.12);
+      --red: #ef4444;
+      --red-dim: rgba(239,68,68,0.12);
+      --purple: #a78bfa;
+      --purple-dim: rgba(167,139,250,0.12);
+      --radius: 8px;
+      --radius-lg: 12px;
+    }
+
+    body {
+      background: var(--bg-0);
+      color: var(--text-1);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Layout */
+    .shell {
+      display: grid;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    /* Top bar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(9,9,11,0.82);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .topbar-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-0);
+      letter-spacing: -0.01em;
+    }
+
+    .topbar-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+    }
+
+    .topbar-subtitle {
+      font-size: 13px;
+      color: var(--text-3);
+      font-weight: 400;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 150ms, border-color 150ms, color 150ms, opacity 150ms;
+      white-space: nowrap;
+      line-height: 1.4;
+    }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #fff;
+      border-color: var(--blue);
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.12); }
+
+    .btn-danger {
+      background: var(--red-dim);
+      color: var(--red);
+      border-color: rgba(239,68,68,0.25);
+    }
+    .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.2); border-color: var(--red); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-2);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); border-color: var(--border-hover); }
+
+    .btn-sm {
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .btn-step {
+      background: var(--bg-2);
+      color: var(--text-2);
+      border: 1px solid var(--border);
+      padding: 5px 10px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+    .btn-step:hover:not(:disabled) { background: var(--bg-3); color: var(--text-0); border-color: var(--border-hover); }
+
+    /* Main content */
+    .main {
+      padding: 24px 28px 60px;
+      max-width: 1380px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* Active job strip */
+    .job-strip {
+      background: var(--bg-2);
+      border: 1px solid rgba(59,130,246,0.25);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .job-strip.hidden { display: none; }
+
+    .job-strip-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .pulse-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .job-strip-text { font-size: 13px; font-weight: 500; color: var(--text-1); }
+    .job-strip-target { color: var(--text-3); font-weight: 400; margin-left: 6px; }
+
+    .job-timer {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-2);
+      letter-spacing: 0.02em;
+    }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 800px) { .stats-row { grid-template-columns: repeat(2, 1fr); } }
+
+    .stat-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-3);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-0);
+      letter-spacing: -0.02em;
+    }
+    .stat-sub {
+      font-size: 12px;
+      color: var(--text-4);
+      margin-top: 2px;
+    }
+
+    /* Section headings */
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-0);
+      letter-spacing: -0.01em;
+    }
+
+    /* Filter pills */
+    .filter-bar {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-1);
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .filter-pill {
+      background: transparent;
+      border: none;
+      color: var(--text-3);
+      padding: 5px 11px;
+      font-size: 12px;
+      font-weight: 500;
+      font-family: inherit;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 120ms, color 120ms;
+      white-space: nowrap;
+    }
+    .filter-pill.active {
+      background: var(--bg-4);
+      color: var(--text-0);
+    }
+    .filter-pill:hover:not(.active) { color: var(--text-1); }
+
+    /* Model grid */
+    .model-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(640px, 1fr));
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 720px) { .model-grid { grid-template-columns: 1fr; } }
+
+    /* Class card */
+    .class-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      transition: border-color 150ms;
+    }
+    .class-card:hover { border-color: var(--border-hover); }
+
+    .class-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .class-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-0);
+    }
+
+    .class-body {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    @media (max-width: 480px) { .class-body { grid-template-columns: 1fr; } }
+
+    .model-cell {
+      padding: 14px 16px;
+    }
+    .model-cell + .model-cell {
+      border-left: 1px solid var(--border);
+    }
+    @media (max-width: 480px) {
+      .model-cell + .model-cell { border-left: none; border-top: 1px solid var(--border); }
+    }
+
+    .model-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-2);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    /* Pipeline status list */
+    .pipeline-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 12px;
+    }
+    .pipeline-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-3);
+    }
+
+    /* Indicator chips */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+    .chip-done { background: var(--green-dim); color: var(--green); }
+    .chip-partial { background: var(--blue-dim); color: var(--blue); }
+    .chip-pending { background: var(--bg-3); color: var(--text-4); }
+    .chip-warn { background: var(--amber-dim); color: var(--amber); }
+
+    /* Step buttons container */
+    .step-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+    }
+    .step-buttons .btn-full { grid-column: 1 / -1; }
+
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--bg-4);
+      color: var(--text-3);
+      font-size: 10px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    /* Preview box */
+    .preview-box {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .preview-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .preview-badge {
+      font-size: 9px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 3px;
+      letter-spacing: 0.02em;
+    }
+    .preview-badge.dummy {
+      background: rgba(245, 158, 11, 0.12);
+      color: var(--amber);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+    }
+    .preview-badge.live {
+      background: rgba(16, 185, 129, 0.12);
+      color: var(--green);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+    }
+    .preview-item {
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      border-radius: 5px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--bg-3);
+      transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+    }
+    .preview-item:hover {
+      border-color: var(--blue);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    }
+    .preview-thumb {
+      width: 100%;
+      height: 48px;
+      object-fit: cover;
+      display: block;
+      background: var(--bg-4);
+    }
+    .preview-item-caption {
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--text-3);
+      padding: 2px 3px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+    }
+    .preview-item:hover .preview-item-caption {
+      color: var(--text-1);
+    }
+
+    .preview-empty {
+      font-size: 11px;
+      color: var(--text-4);
+      padding: 6px 0;
+      text-align: center;
+    }
+
+    /* Lightbox modal */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      background: rgba(0,0,0,0.88);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease;
+      backdrop-filter: blur(4px);
+    }
+    .lightbox.open { opacity: 1; pointer-events: auto; }
+    .lightbox img {
+      max-width: 88vw;
+      max-height: 80vh;
+      border-radius: 8px;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.8);
+      border: 1px solid rgba(255,255,255,0.1);
+      object-fit: contain;
+    }
+    .lightbox-close {
+      position: absolute;
+      top: 20px;
+      right: 24px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      color: var(--text-1);
+      font-size: 13px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .lightbox-close:hover {
+      background: var(--bg-4);
+      color: #fff;
+    }
+    .lightbox-caption {
+      margin-top: 14px;
+      color: var(--text-2);
+      font-size: 13px;
+      text-align: center;
+      font-weight: 500;
+    }
+
+    /* Terminal */
+    .terminal {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      margin-bottom: 32px;
+    }
+
+    .terminal-bar {
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .terminal-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .terminal-dots { display: flex; gap: 5px; }
+    .tdot { width: 9px; height: 9px; border-radius: 50%; }
+    .tdot-r { background: #5c3a3a; }
+    .tdot-y { background: #5c5a3a; }
+    .tdot-g { background: #3a5c3e; }
+
+    .terminal-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-3);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .terminal-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--text-3);
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle-label input { accent-color: var(--blue); }
+
+    .terminal-output {
+      padding: 14px 16px;
+      height: 340px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--text-2);
+      background: var(--bg-0);
+    }
+    .terminal-output::-webkit-scrollbar { width: 6px; }
+    .terminal-output::-webkit-scrollbar-track { background: transparent; }
+    .terminal-output::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-line.l-ok { color: var(--green); }
+    .log-line.l-err { color: var(--red); }
+    .log-line.l-warn { color: var(--amber); }
+    .log-line.l-sys { color: var(--blue); }
+    .log-line.l-dim { color: var(--text-4); }
+
+    /* Evaluation table */
+    .table-section {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    .table-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+    th {
+      background: var(--bg-2);
+      color: var(--text-3);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      color: var(--text-1);
+      white-space: nowrap;
+    }
+    tr:hover td { background: rgba(255,255,255,0.015); }
+
+    .empty-msg {
+      text-align: center;
+      padding: 36px 20px;
+      color: var(--text-4);
+      font-size: 13px;
+    }
+
+    /* Footer */
+    footer {
+      margin-top: 40px;
+      text-align: center;
+      color: var(--text-4);
+      font-size: 12px;
+      padding: 20px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-3);
+      color: var(--text-1);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      border: 1px solid var(--border-hover);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 200ms, transform 200ms;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-title">3D Reconstruction Pipeline</span>
+      <div class="topbar-sep"></div>
+      <span class="topbar-subtitle">Vanilla 3DGS vs SuGaR &mdash; 8 Tipologi Patung Bali</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-ghost btn-sm" onclick="refreshAll()">Refresh</button>
+      <button id="btnStop" class="btn btn-danger btn-sm" onclick="triggerStop()" disabled>Stop</button>
+      <button id="btnRunAll" class="btn btn-primary btn-sm" onclick="triggerRun('full_pipeline','','')">Run All 16 Models</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- Active job strip -->
+    <div id="jobStrip" class="job-strip hidden">
+      <div class="job-strip-left">
+        <div class="pulse-dot"></div>
+        <span class="job-strip-text" id="jobLabel">Running: full_pipeline</span>
+        <span class="job-strip-target" id="jobTarget"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="job-timer" id="jobTimer">00:00:00</span>
+        <button class="btn btn-danger btn-sm" onclick="triggerStop()">Stop</button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">Total Models</div>
+        <div class="stat-value">16</div>
+        <div class="stat-sub">8 classes &times; 2 statues</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Completed</div>
+        <div class="stat-value" id="kpiCompleted" style="color:var(--green)">0 / 16</div>
+        <div class="stat-sub" id="kpiCompletedSub">3DGS + SuGaR finished</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg PSNR</div>
+        <div class="stat-value" id="kpiPsnr" style="color:var(--blue)">&mdash;</div>
+        <div class="stat-sub">Render fidelity (dB)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg Chamfer Dist</div>
+        <div class="stat-value" id="kpiChamfer" style="color:var(--purple)">&mdash;</div>
+        <div class="stat-sub">Geometry accuracy (mm)</div>
+      </div>
+    </div>
+
+    <!-- Class grid -->
+    <div class="section-head">
+      <div class="section-title">Pipeline Status by Class</div>
+      <div class="filter-bar" id="filterBar">
+        <button class="filter-pill active" onclick="filterClass('ALL')">All</button>
+        <button class="filter-pill" onclick="filterClass('Dewa')">Dewa</button>
+        <button class="filter-pill" onclick="filterClass('Dewi')">Dewi</button>
+        <button class="filter-pill" onclick="filterClass('Mitologi')">Mitologi</button>
+        <button class="filter-pill" onclick="filterClass('Penabuh')">Penabuh</button>
+        <button class="filter-pill" onclick="filterClass('Pengapit')">Pengapit</button>
+        <button class="filter-pill" onclick="filterClass('Punakawan')">Punakawan</button>
+        <button class="filter-pill" onclick="filterClass('Raksasa')">Raksasa</button>
+        <button class="filter-pill" onclick="filterClass('Wanara')">Wanara</button>
+      </div>
+    </div>
+
+    <div class="model-grid" id="modelGrid"></div>
+
+    <!-- Terminal -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-bar-left">
+          <div class="terminal-dots"><div class="tdot tdot-r"></div><div class="tdot tdot-y"></div><div class="tdot tdot-g"></div></div>
+          <span class="terminal-label">output</span>
+          <span class="chip chip-pending" id="termStatus">idle</span>
+        </div>
+        <div class="terminal-bar-right">
+          <label class="toggle-label"><input type="checkbox" id="chkScroll" checked> Auto-scroll</label>
+          <button class="btn btn-ghost btn-sm" onclick="clearTerm()">Clear</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyLogs()">Copy</button>
+        </div>
+      </div>
+      <div class="terminal-output" id="termBody">
+        <div class="log-line l-dim">Ready. Select a model or click "Run All 16 Models" to start.</div>
+      </div>
+    </div>
+
+    <!-- Metrics table -->
+    <div class="table-section">
+      <div class="table-head">
+        <div class="section-title">Evaluation Metrics</div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-ghost btn-sm" onclick="refreshMetrics()">Reload</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Class</th>
+              <th>Model</th>
+              <th>Method</th>
+              <th>PSNR (dB)</th>
+              <th>SSIM</th>
+              <th>LPIPS</th>
+              <th>Chamfer (mm)</th>
+              <th>Peak VRAM</th>
+              <th>Duration</th>
+            </tr>
+          </thead>
+          <tbody id="metricsBody">
+            <tr><td colspan="10" class="empty-msg">No evaluation data yet. Run pipeline to generate metrics.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer>
+      Skripsi &mdash; 3D Reconstruction of Balinese Statues: 3DGS vs SuGaR Comparison
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">Close (Esc)</button>
+  <img id="lightboxImg" src="" alt="Preview" onclick="event.stopPropagation()">
+  <div class="lightbox-caption" id="lightboxCaption" onclick="event.stopPropagation()"></div>
+</div>
+
+<script>
+const STEPS = [
+  { key: 'extract_frames', label: '1. Extract Frames', needsVideo: true },
+  { key: 'colmap',         label: '2. COLMAP' },
+  { key: '3dgs',           label: '3. Train 3DGS' },
+  { key: 'sugar',          label: '4. Train SuGaR' },
+  { key: 'evaluate',       label: '5. Evaluate' },
+];
+
+let activeFilter = 'ALL';
+let isJobRunning = false;
+let cachedStatus = {};
+
+window.addEventListener('DOMContentLoaded', () => {
+  refreshAll();
+  setInterval(pollLogs, 2500);
+  setInterval(() => refreshStatus(false), 8000);
+});
+
+function refreshAll() {
+  refreshStatus(true);
+  refreshMetrics();
+}
+
+async function refreshStatus(feedback) {
+  try {
+    const r = await fetch('/api/status');
+    if (!r.ok) return;
+    cachedStatus = await r.json();
+    renderGrid(cachedStatus);
+    updateKpi(cachedStatus);
+    if (feedback) showToast('Status refreshed');
+  } catch(e) { console.error(e); }
+}
+
+async function refreshMetrics() {
+  try {
+    const r = await fetch('/api/metrics');
+    if (!r.ok) return;
+    renderTable(await r.json());
+  } catch(e) { console.error(e); }
+}
+
+function updateKpi(data) {
+  let done = 0;
+  for (const cls in data) for (const m in data[cls]) if (data[cls][m].overall_status === 'Completed') done++;
+  document.getElementById('kpiCompleted').textContent = done + ' / 16';
+  document.getElementById('kpiCompletedSub').textContent = done === 16 ? 'All models completed' : (16 - done) + ' remaining';
+}
+
+function renderGrid(data) {
+  const grid = document.getElementById('modelGrid');
+  grid.innerHTML = '';
+
+  for (const [cls, models] of Object.entries(data)) {
+    if (activeFilter !== 'ALL' && activeFilter !== cls) continue;
+
+    const card = document.createElement('div');
+    card.className = 'class-card';
+
+    let cells = '';
+    for (const [mdl, info] of Object.entries(models)) {
+      const imgChip = info.images_count > 0
+        ? `<span class="chip chip-done">${info.images_count} photos</span>`
+        : `<span class="chip chip-warn">No photos</span>`;
+      const colmapChip = info.colmap_done
+        ? `<span class="chip chip-done">Done</span>`
+        : `<span class="chip chip-pending">Pending</span>`;
+      const dgsChip = info['3dgs_30k']
+        ? `<span class="chip chip-done">30k iter</span>`
+        : (info['3dgs_7k'] ? `<span class="chip chip-partial">7k iter</span>` : `<span class="chip chip-pending">Pending</span>`);
+      const sugarChip = info.sugar_obj
+        ? `<span class="chip chip-done">OBJ ready</span>`
+        : (info.sugar_mesh ? `<span class="chip chip-partial">Mesh only</span>` : `<span class="chip chip-pending">Pending</span>`);
+
+      const extraInfo = [];
+      if (info.has_video) extraInfo.push('<span class="chip chip-partial">Video</span>');
+      if (info.has_gt_lidar) extraInfo.push('<span class="chip chip-partial">LiDAR GT</span>');
+
+      // Build extract frames button (conditional)
+      const extractBtn = info.has_video
+        ? `<button class="btn-step btn-full" onclick="triggerRun('extract_frames','${cls}','${mdl}')" ${isJobRunning ? 'disabled' : ''}>1. Extract Frames</button>`
+        : '';
+      const dis = isJobRunning ? 'disabled' : '';
+
+      cells += `
+        <div class="model-cell">
+          <div class="model-label">${mdl} ${extraInfo.join(' ')}</div>
+          <div class="pipeline-rows">
+            <div class="pipeline-row"><span>Dataset</span>${imgChip}</div>
+            <div class="pipeline-row"><span>COLMAP</span>${colmapChip}</div>
+            <div class="pipeline-row"><span>3DGS</span>${dgsChip}</div>
+            <div class="pipeline-row"><span>SuGaR</span>${sugarChip}</div>
+          </div>
+          <div class="step-buttons">
+            <button class="btn btn-primary btn-sm btn-full" onclick="triggerRun('full_pipeline','${cls}','${mdl}')" ${dis}>Run Full Pipeline</button>
+            <button class="btn-step" onclick="triggerRun('colmap','${cls}','${mdl}')" ${dis}>2. COLMAP</button>
+            <button class="btn-step" onclick="triggerRun('3dgs','${cls}','${mdl}')" ${dis}>3. Train 3DGS</button>
+            <button class="btn-step" onclick="triggerRun('sugar','${cls}','${mdl}')" ${dis}>4. Train SuGaR</button>
+            <button class="btn-step" onclick="triggerRun('evaluate','${cls}','${mdl}')" ${dis}>5. Evaluate</button>
+            ${extractBtn}
+          </div>
+          <div class="preview-box" id="preview-box-${cls}-${mdl}"></div>
+        </div>
+      `;
+    }
+
+    card.innerHTML = `
+      <div class="class-header">
+        <span class="class-name">${cls}</span>
+        <button class="btn btn-ghost btn-sm" onclick="triggerRun('full_pipeline','${cls}','')" ${isJobRunning ? 'disabled' : ''}>Run Class</button>
+      </div>
+      <div class="class-body">${cells}</div>
+    `;
+    grid.appendChild(card);
+  }
+  loadVisiblePreviews();
+}
+
+function filterClass(cls) {
+  activeFilter = cls;
+  document.querySelectorAll('.filter-pill').forEach(p => {
+    p.classList.toggle('active', p.textContent === cls || (cls === 'ALL' && p.textContent === 'All'));
+  });
+  renderGrid(cachedStatus);
+}
+
+async function triggerRun(action, cls, mdl) {
+  if (isJobRunning) { alert('A job is already running. Wait or stop it first.'); return; }
+
+  const target = cls && mdl ? `${cls}/${mdl}` : (cls ? `all models in ${cls}` : 'all 16 models');
+  if (!confirm(`Run "${action}" for ${target}?`)) return;
+
+  try {
+    const r = await fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ action, class_name: cls, model_id: mdl, gpu: 0 })
+    });
+    const d = await r.json();
+    if (!r.ok) alert(d.error || 'Failed to start');
+    else { pollLogs(); refreshStatus(false); }
+  } catch(e) { alert('Connection error: ' + e.message); }
+}
+
+async function triggerStop() {
+  if (!confirm('Stop the running job?')) return;
+  try { await fetch('/api/stop', {method:'POST'}); pollLogs(); } catch(e) { alert(e.message); }
+}
+
+async function pollLogs() {
+  try {
+    const r = await fetch('/api/logs');
+    if (!r.ok) return;
+    const d = await r.json();
+    isJobRunning = d.is_running;
+
+    const strip = document.getElementById('jobStrip');
+    const stopBtn = document.getElementById('btnStop');
+    const termChip = document.getElementById('termStatus');
+
+    if (d.is_running) {
+      strip.classList.remove('hidden');
+      document.getElementById('jobLabel').textContent = 'Running: ' + d.action;
+      document.getElementById('jobTarget').textContent = d.target || '';
+      document.getElementById('jobTimer').textContent = fmtSec(d.elapsed_seconds);
+      stopBtn.disabled = false;
+      termChip.textContent = 'running';
+      termChip.className = 'chip chip-partial';
+    } else {
+      strip.classList.add('hidden');
+      stopBtn.disabled = true;
+      const st = d.status || 'idle';
+      termChip.textContent = st.toLowerCase();
+      termChip.className = 'chip ' + (st === 'COMPLETED' ? 'chip-done' : st === 'ERROR' ? 'chip-warn' : 'chip-pending');
+    }
+
+    if (d.logs && d.logs.length > 0) renderLogs(d.logs);
+  } catch(e) { console.error(e); }
+}
+
+function renderLogs(logs) {
+  const el = document.getElementById('termBody');
+  const scroll = document.getElementById('chkScroll').checked;
+  el.innerHTML = '';
+  for (const line of logs) {
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    if (line.includes('[SUCCESS]') || line.includes('BERHASIL')) div.classList.add('l-ok');
+    else if (line.includes('[ERROR]') || line.includes('GAGAL') || line.includes('Exception')) div.classList.add('l-err');
+    else if (line.includes('[WARNING]') || line.includes('WARN')) div.classList.add('l-warn');
+    else if (line.includes('[WEB RUNNER]') || line.includes('[THESIS')) div.classList.add('l-sys');
+    div.textContent = line;
+    el.appendChild(div);
+  }
+  if (scroll) el.scrollTop = el.scrollHeight;
+}
+
+function clearTerm() { document.getElementById('termBody').innerHTML = '<div class="log-line l-dim">Terminal cleared.</div>'; }
+function copyLogs() {
+  navigator.clipboard.writeText(document.getElementById('termBody').innerText)
+    .then(() => showToast('Logs copied to clipboard'));
+}
+
+function renderTable(rows) {
+  const tb = document.getElementById('metricsBody');
+  if (!rows || !rows.length) {
+    tb.innerHTML = '<tr><td colspan="10" class="empty-msg">No evaluation data yet.</td></tr>';
+    return;
+  }
+  tb.innerHTML = '';
+  let psnrS=0, psnrN=0, chamS=0, chamN=0;
+  for (const r of rows) {
+    const pv = parseFloat(r.psnr_avg); if (!isNaN(pv)) { psnrS+=pv; psnrN++; }
+    const cv = parseFloat(r.chamfer_distance_mm); if (!isNaN(cv)) { chamS+=cv; chamN++; }
+    const methodCls = r.method === 'SuGaR' ? 'chip-done' : 'chip-partial';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="color:var(--text-4);font-size:12px">${r.timestamp||'-'}</td>
+      <td><strong>${r.class||'-'}</strong></td>
+      <td>${r.model||'-'}</td>
+      <td><span class="chip ${methodCls}">${r.method||'-'}</span></td>
+      <td style="font-weight:600;color:var(--blue)">${fmtN(r.psnr_avg)}</td>
+      <td>${fmtN(r.ssim_avg)}</td>
+      <td>${fmtN(r.lpips_avg)}</td>
+      <td style="font-weight:600;color:var(--purple)">${fmtN(r.chamfer_distance_mm)}</td>
+      <td style="font-size:12px">${r.peak_vram_mb ? Math.round(r.peak_vram_mb)+' MB' : '-'}</td>
+      <td style="font-size:12px">${r.duration_seconds ? (r.duration_seconds/60).toFixed(1)+' min' : '-'}</td>
+    `;
+    tb.appendChild(tr);
+  }
+  if (psnrN) document.getElementById('kpiPsnr').textContent = (psnrS/psnrN).toFixed(2) + ' dB';
+  if (chamN) document.getElementById('kpiChamfer').textContent = (chamS/chamN).toFixed(2) + ' mm';
+}
+
+function fmtN(v) { const n = parseFloat(v); return isNaN(n) ? '-' : n.toFixed(4); }
+function fmtSec(s) {
+  if (!s) return '00:00:00';
+  const t = Math.floor(s);
+  return [Math.floor(t/3600), Math.floor(t%3600/60), t%60].map(v=>String(v).padStart(2,'0')).join(':');
+}
+function exportCSV() { window.open('/api/metrics','_blank'); }
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// Preview gallery
+const CLASSES = ['Dewa','Dewi','Mitologi','Penabuh','Pengapit','Punakawan','Raksasa','Wanara'];
+const MODELS = ['model_01','model_02'];
+const previewCache = {};
+
+function loadVisiblePreviews() {
+  for (const cls of CLASSES) {
+    if (activeFilter !== 'ALL' && activeFilter !== cls) continue;
+    for (const mdl of MODELS) {
+      loadPreview(cls, mdl);
+    }
+  }
+}
+
+async function loadPreview(cls, mdl) {
+  const el = document.getElementById(`preview-box-${cls}-${mdl}`);
+  if (!el) return;
+
+  const key = `${cls}/${mdl}`;
+  if (previewCache[key]) {
+    renderPreviewContent(el, previewCache[key]);
+    return;
+  }
+
+  try {
+    const r = await fetch(`/api/previews/${cls}/${mdl}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    previewCache[key] = data;
+    renderPreviewContent(el, data);
+  } catch(e) {
+    console.error(`Preview fetch error for ${key}:`, e);
+  }
+}
+
+function renderPreviewContent(el, data) {
+  if (!data || !data.images || data.images.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  let itemsHtml = '';
+  for (const img of data.images) {
+    itemsHtml += `
+      <div class="preview-item" onclick="openLightbox('${img.src}', '${img.label}')" title="${img.label} — Click to enlarge">
+        <img class="preview-thumb" src="${img.src}" alt="${img.label}" loading="lazy">
+        <span class="preview-item-caption">${img.label}</span>
+      </div>
+    `;
+  }
+
+  el.innerHTML = `
+    <div class="preview-header">
+      <span class="preview-title">Visual Preview</span>
+      <span class="preview-badge live">Trained Output</span>
+    </div>
+    <div class="preview-grid">${itemsHtml}</div>
+  `;
+}
+
+function openLightbox(src, caption) {
+  const lb = document.getElementById('lightbox');
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightboxCaption').textContent = caption || '';
+  lb.classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeLightbox();
+});
+</script>
+</body>
+</html>

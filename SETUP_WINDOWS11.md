@@ -153,8 +153,38 @@ Perintah ini akan:
 
 ---
 
-## 5. Melihat Hasil Rekapitulasi Data Skripsi
+## 5. Menjalankan Web Dashboard Interaktif (Localhost GUI)
+
+Jika Anda ingin memantau progres dan menjalankan pelatihan menggunakan antarmuka grafis (UI website lokal) tanpa mengetik perintah di terminal:
+
+### Cara Menjalankan:
+1. **Opsi 1 (Double-Click)**: Cukup klik ganda file `start_dashboard.bat` di folder utama proyek.
+2. **Opsi 2 (Terminal)**:
+   ```bash
+   python web_dashboard/server.py
+   ```
+3. Browser Anda akan terbuka secara otomatis di alamat: **`http://localhost:8080`**
+
+### Fitur Utama Web Dashboard:
+* **Katalog 8 Tipologi Patung**: Menampilkan 16 model patung lengkap dengan indikator foto, ketersediaan video, dan file LiDAR.
+* **Indikator Status Real-Time**: Status pengerjaan COLMAP, Vanilla 3DGS (7k & 30k), dan SuGaR (Mesh & OBJ) termonitor live.
+* **Tombol Per-Step Pipeline**: Setiap model memiliki tombol eksekusi per tahap:
+  - `1. Extract Frames` (tampil otomatis jika ada video cadangan).
+  - `2. COLMAP` — Structure from Motion.
+  - `3. Train 3DGS` — Baseline Vanilla 3DGS.
+  - `4. Train SuGaR` — Mesh extraction & refinement.
+  - `5. Evaluate` — Metrik kuantitatif + Auto-ICP.
+  - `Run Full Pipeline` — Menjalankan seluruh tahap secara berurutan.
+* **Batch Runner**: Tombol `Run All 16 Models` di header untuk menjalankan seluruh 16 model secara berurutan.
+* **Terminal Konsol Real-time**: Menampilkan output eksekusi baris-demi-baris dengan auto-scroll dan tombol pembatalan.
+* **Galeri Visual Preview & Lightbox**: Menampilkan hasil render 3DGS dan textured mesh SuGaR secara otomatis setelah model selesai dilatih, lengkap dengan modal pembesar (lightbox).
+* **Tabel Metrik Terintegrasi**: Membaca otomatis metrik skripsi (PSNR, SSIM, LPIPS, Chamfer Distance, VRAM, Durasi) lengkap dengan opsi ekspor ke file CSV/Excel.
+
+---
+
+## 6. Melihat Hasil Rekapitulasi Data Skripsi
 
 Setiap kali proses selesai, tabel ringkasan metrik skripsi Anda otomatis diperbarui di:
 * **Format CSV**: `outputs/logs/evaluation_reports/summary_comparison.csv` *(Buka di Excel untuk membuat diagram perbandingan)*
 * **Format Markdown**: `outputs/logs/evaluation_reports/summary_comparison.md` *(Langsung copy-paste ke Bab 4 Hasil dan Pembahasan Skripsi)*
+

@@ -63,11 +63,13 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
     camera_transforms = sorted(unsorted_camera_transforms.copy(), key = lambda x : x['img_name'])
 
     cam_list = []
-    extension = '.' + os.listdir(image_dir)[0].split('.')[-1]
-    if extension not in ['.jpg', '.png', '.JPG', '.PNG']:
-        print(f"Warning: image extension {extension} not supported.")
-    else:
-        print(f"Found image extension {extension}")
+    image_paths = {}
+    for filename in sorted(os.listdir(image_dir)):
+        stem, extension = os.path.splitext(filename)
+        if extension.lower() in ['.jpg', '.jpeg', '.png']:
+            if stem in image_paths:
+                raise ValueError(f"Ambiguous image basename: {stem}. Use unique image names.")
+            image_paths[stem] = os.path.join(image_dir, filename)
     
     for cam_idx in range(len(camera_transforms)):
         camera_transform = camera_transforms[cam_idx]
@@ -96,7 +98,9 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
         # GT data
         id = camera_transform['id']
         name = camera_transform['img_name']
-        image_path = os.path.join(image_dir,  name + extension)
+        if name not in image_paths:
+            raise FileNotFoundError(f"Image for camera {name} not found in {image_dir}")
+        image_path = image_paths[name]
         
         if load_gt_images:
             image = Image.open(image_path)
@@ -133,6 +137,7 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
             colmap_id=id, image=gt_image, gt_alpha_mask=None,
             R=R, T=T, FoVx=fov_x, FoVy=fov_y,
             image_name=name, uid=id,
+            data_device=os.environ.get('SUGAR_IMAGE_DEVICE', 'cuda'),
             image_height=image_height, image_width=image_width,)
         
         cam_list.append(gs_camera)
@@ -544,4 +549,3 @@ class CamerasWrapper:
 
         radius = 1.1 * half_diagonal
         return radius
-    

@@ -1,46 +1,34 @@
-import os
+"""Create the 18 dataset slots without replacing existing data."""
+import argparse
+import sys
 from pathlib import Path
 
-CLASSES = [
-    "Dewa",
-    "Dewi",
-    "Mitologi",
-    "Penabuh",
-    "Pengapit",
-    "Punakawan",
-    "Raksasa",
-    "Wanara"
-]
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pipeline_tools.dataset_registry import PROJECT_ROOT, scene_pairs
 
-MODELS = ["model_01", "model_02"]
-SUBDIRS = ["images", "raw_video", "ground_truth"]
+
+def initialize_workspace(base_dir=PROJECT_ROOT):
+    base_dir = Path(base_dir)
+    for cls, mdl in scene_pairs():
+        for sub in ("input", "images", "raw_video", "ground_truth"):
+            folder = base_dir / "datasets" / cls / mdl / sub
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / ".gitkeep").touch(exist_ok=True)
+        for method, subdirs in {"3dgs": ("point_cloud", "evaluation"),
+                               "sugar": ("coarse", "mesh", "refined", "textured_mesh", "evaluation")}.items():
+            for sub in subdirs:
+                (base_dir / "outputs" / method / cls / mdl / sub).mkdir(parents=True, exist_ok=True)
+    for sub in ("logs/training_logs", "logs/evaluation_reports", "queue/logs", "locks"):
+        (base_dir / "outputs" / sub).mkdir(parents=True, exist_ok=True)
+    return len(scene_pairs())
+
 
 def main():
-    base_dir = Path(__file__).resolve().parent.parent
-    dataset_dir = base_dir / "datasets"
-    outputs_dir = base_dir / "outputs"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=PROJECT_ROOT)
+    args = parser.parse_args()
+    print(f"Folder input/output {initialize_workspace(args.root)} model siap di {args.root.resolve()}")
 
-    print(f"Menginisialisasi struktur folder di: {base_dir}")
-
-    # Buat folder datasets
-    for cls in CLASSES:
-        for mdl in MODELS:
-            for sub in SUBDIRS:
-                folder_path = dataset_dir / cls / mdl / sub
-                folder_path.mkdir(parents=True, exist_ok=True)
-                gitkeep = folder_path / ".gitkeep"
-                if not gitkeep.exists():
-                    gitkeep.touch()
-
-    # Buat folder outputs
-    for sub in ["3dgs", "sugar", "logs/training_logs", "logs/evaluation_reports"]:
-        folder_path = outputs_dir / sub
-        folder_path.mkdir(parents=True, exist_ok=True)
-        gitkeep = folder_path / ".gitkeep"
-        if not gitkeep.exists():
-            gitkeep.touch()
-
-    print("Inisialisasi 8 kelas patung dan folder outputs selesai dengan sukses!")
 
 if __name__ == "__main__":
     main()

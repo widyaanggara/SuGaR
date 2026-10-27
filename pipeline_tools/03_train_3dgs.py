@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import argparse
+import json
 from pathlib import Path
 
 # Add project root to sys.path
@@ -9,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from pipeline_tools.logger_utils import ThesisLogger
+from pipeline_tools.gpu_lock import gpu_lock
+from pipeline_tools.dataset_registry import has_colmap_model
 
 
 def train_vanilla_3dgs(scene_path: str,
@@ -25,6 +28,8 @@ def train_vanilla_3dgs(scene_path: str,
     Menyimpan checkpoint pada 7.000 iterasi (untuk SuGaR) dan 30.000 iterasi (baseline final).
     """
     scene_path = Path(scene_path).resolve()
+    if not has_colmap_model(scene_path):
+        raise FileNotFoundError("COLMAP belum lengkap: perlu images/ dan sparse/0/{cameras,images,points3D}.")
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -32,14 +37,11 @@ def train_vanilla_3dgs(scene_path: str,
     if not train_script.exists():
         raise FileNotFoundError(f"Script pelatihan 3DGS tidak ditemukan di: {train_script}")
 
-    save_iter_str = " ".join(str(i) for i in save_iterations)
-    chkpt_iter_str = " ".join(str(i) for i in checkpoint_iterations)
-    white_bg_flag = "-w" if white_background else ""
-    eval_flag = "--eval" if eval_split else ""
-
     cmd = [
         sys.executable,
         str(train_script),
+        "--disable_viewer",
+        "--data_device", "cpu",
         "-s", str(scene_path),
         "-m", str(output_dir),
         "--iterations", str(iterations),
@@ -53,6 +55,7 @@ def train_vanilla_3dgs(scene_path: str,
 
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+    env["PYTHONUNBUFFERED"] = "1"
 
     if logger:
         logger.log(f"Memulai pelatihan Vanilla 3DGS:")
@@ -73,17 +76,31 @@ def train_vanilla_3dgs(scene_path: str,
         errors="replace"
     )
 
-    for line in proc.stdout:
-        line_clean = line.strip()
-        if line_clean:
-            if logger and any(k in line_clean for k in ["Iteration:", "Training progress", "[", "Loss"]):
-                logger.log(f"[3DGS] {line_clean}")
-            elif not logger:
-                print(f"[3DGS] {line_clean}")
+    if logger:
+        logger.start_vram_monitor(proc.pid)
+    try:
+        for line in proc.stdout:
+            line_clean = line.strip()
+            if line_clean:
+                if logger:
+                    logger.log(f"[3DGS] {line_clean}")
+                elif not logger:
+                    print(f"[3DGS] {line_clean}")
+    finally:
+        proc.wait()
+        if logger:
+            logger.stop_vram_monitor()
 
-    proc.wait()
     if proc.returncode != 0:
         raise RuntimeError(f"Pelatihan 3DGS gagal dengan kode error: {proc.returncode}")
+
+    statistics = output_dir / 'run_statistics.json'
+    if logger and statistics.is_file():
+        stats = json.loads(statistics.read_text(encoding='utf-8'))
+        # Match SuGaR's torch peak allocated metric, even when WSL cannot query process VRAM.
+        logger.data['peak_vram_gb'] = round(stats['peak_allocated_gb'], 3)
+        logger.data['vram_measurement'] = 'torch_peak_allocated'
+        logger.set_parameters({'peak_reserved_gb': stats['peak_reserved_gb'], 'phase': 'training'})
 
     if logger:
         logger.end_stage("Pelatihan_3DGS")
@@ -101,6 +118,8 @@ def main():
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU (default: 0).")
 
     args = parser.parse_args()
+    if args.gpu < 0 or args.iterations < 7000:
+        parser.error("GPU harus >= 0 dan iterasi >= 7000 untuk checkpoint SuGaR.")
 
     if args.output_dir is None:
         output_dir = PROJECT_ROOT / "outputs" / "3dgs" / args.statue_class / args.model_id
@@ -115,14 +134,17 @@ def main():
     })
 
     try:
-        train_vanilla_3dgs(
-            scene_path=args.scene_path,
-            output_dir=str(output_dir),
-            iterations=args.iterations,
-            white_background=args.white_background,
-            gpu=args.gpu,
-            logger=logger
-        )
+        with gpu_lock(args.gpu):
+            train_vanilla_3dgs(
+                scene_path=args.scene_path,
+                output_dir=str(output_dir),
+                iterations=args.iterations,
+                save_iterations=sorted({7000, args.iterations}),
+                checkpoint_iterations=sorted({7000, args.iterations}),
+                white_background=args.white_background,
+                gpu=args.gpu,
+                logger=logger
+            )
         logger.finalize(success=True)
     except Exception as e:
         logger.log(f"Error pada pelatihan 3DGS: {str(e)}", level="error")

@@ -10,6 +10,7 @@
 #
 
 import os
+import json
 import numpy  # Added to avoid issue
 import torch
 from random import randint
@@ -199,6 +200,7 @@ if __name__ == "__main__":
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")
     parser.add_argument('--port', type=int, default=6009)
+    parser.add_argument('--disable_viewer', action='store_true', help='Do not bind the interactive viewer on a training server.')
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
@@ -213,11 +215,17 @@ if __name__ == "__main__":
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
+    torch.cuda.reset_peak_memory_stats()
 
     # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
+    if not args.disable_viewer:
+        network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    with open(os.path.join(args.model_path, 'run_statistics.json'), 'w', encoding='utf-8') as stats_file:
+        json.dump({'peak_allocated_gb': torch.cuda.max_memory_allocated() / (1024 ** 3),
+                   'peak_reserved_gb': torch.cuda.max_memory_reserved() / (1024 ** 3),
+                   'iterations': args.iterations}, stats_file, indent=2)
 
     # All done
     print("\nTraining complete.")

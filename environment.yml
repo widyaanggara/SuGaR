@@ -209,6 +209,8 @@ dependencies:
   - zlib=1.2.13=h5eee18b_0
   - zstd=1.5.5=hc292b87_0
   - pip:
+      - opencv-python-headless==4.10.0.84
+      - ninja==1.11.1.1
       - addict==2.4.0
       - ansi2html==1.9.1
       - blinker==1.7.0

@@ -1,163 +1,104 @@
-import os
-import sys
+"""Sequential runner: each stage exits before the next one starts."""
 import argparse
+import json
+import subprocess
+import sys
 from pathlib import Path
 
-# Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(PROJECT_ROOT))
-
-from pipeline_tools.logger_utils import ThesisLogger
-from pipeline_tools.01_extract_frames import extract_frames
-from pipeline_tools.02_run_colmap import run_colmap_pipeline
-from pipeline_tools.03_train_3dgs import train_vanilla_3dgs
-from pipeline_tools.04_train_sugar import train_sugar_pipeline
+sys.path.insert(0, str(PROJECT_ROOT))
+from pipeline_tools.dataset_registry import (CATALOG, has_checkpoint, has_colmap_model,
+                                           has_data, has_sugar_result, media_files,
+                                           scene_pairs, VIDEO_EXTENSIONS, has_evaluation)
 
 
-CLASSES = [
-    "Dewa",
-    "Dewi",
-    "Mitologi",
-    "Penabuh",
-    "Pengapit",
-    "Punakawan",
-    "Raksasa",
-    "Wanara"
-]
+def run_stage(script, arguments, root=PROJECT_ROOT):
+    command = [sys.executable, "-u", str(root / "pipeline_tools" / script), *map(str, arguments)]
+    print(f"[RUN] {subprocess.list2cmdline(command)}", flush=True)
+    subprocess.run(command, cwd=str(root), check=True)
 
 
-def process_single_statue(scene_dir: Path, 
-                           statue_class: str, 
-                           model_id: str,
-                           skip_colmap: bool = False,
-                           skip_3dgs: bool = False,
-                           skip_sugar: bool = False,
-                           refinement_time: str = "short",
-                           gpu: int = 0):
-    """Memproses satu patung secara lengkap dari awal hingga akhir."""
-    print(f"\n=======================================================")
-    print(f"MEMULAI PROSES: {statue_class} - {model_id}")
-    print(f"Direktori: {scene_dir}")
-    print(f"=======================================================")
-
-    images_dir = scene_dir / "images"
-    video_dir = scene_dir / "raw_video"
-    sparse_dir = scene_dir / "sparse" / "0"
-
-    # 1. Cek Citra atau Video Cadangan
-    has_images = images_dir.exists() and len([f for f in images_dir.iterdir() if f.is_file()]) > 0
-    if not has_images:
-        # Coba cek video cadangan
-        videos = list(video_dir.glob("*.mp4")) + list(video_dir.glob("*.MP4"))
-        if videos:
-            print(f"Folder images kosong. Mengekstrak frame dari video cadangan: {videos[0].name}...")
-            frame_logger = ThesisLogger(statue_class=statue_class, model_id=model_id, method="FrameExtraction")
-            extract_frames(str(videos[0]), str(images_dir), fps_extract=2.0, min_sharpness=80.0, logger=frame_logger)
-            frame_logger.finalize(success=True)
-        else:
-            print(f"SKIP {statue_class}/{model_id}: Folder images/ dan raw_video/ tidak memuat data.")
-            return
-
-    # 2. COLMAP (SfM)
-    if not skip_colmap and not sparse_dir.exists():
-        print(f"\n--- Menjalankan COLMAP untuk {statue_class}/{model_id} ---")
-        colmap_logger = ThesisLogger(statue_class=statue_class, model_id=model_id, method="COLMAP")
-        try:
-            run_colmap_pipeline(str(scene_dir), logger=colmap_logger)
-            colmap_logger.finalize(success=True)
-        except Exception as e:
-            print(f"COLMAP Gagal untuk {statue_class}/{model_id}: {str(e)}")
-            colmap_logger.finalize(success=False)
-            return
-    else:
-        print(f"COLMAP dilewati (sparse/0/ sudah ada atau flag --skip_colmap aktif).")
-
-    # 3. Vanilla 3DGS
-    out_3dgs_dir = PROJECT_ROOT / "outputs" / "3dgs" / statue_class / model_id
-    chkpt_7k = out_3dgs_dir / "point_cloud" / "iteration_7000"
-    if not skip_3dgs:
-        print(f"\n--- Melatih Vanilla 3DGS untuk {statue_class}/{model_id} ---")
-        dgs_logger = ThesisLogger(statue_class=statue_class, model_id=model_id, method="3DGS")
-        try:
-            train_vanilla_3dgs(
-                scene_path=str(scene_dir),
-                output_dir=str(out_3dgs_dir),
-                iterations=30000,
-                save_iterations=[7000, 30000],
-                checkpoint_iterations=[7000, 30000],
-                gpu=gpu,
-                logger=dgs_logger
-            )
-            dgs_logger.finalize(success=True)
-        except Exception as e:
-            print(f"Pelatihan 3DGS Gagal: {str(e)}")
-            dgs_logger.finalize(success=False)
-            return
-    else:
-        print(f"Pelatihan 3DGS dilewati.")
-
-    # 4. SuGaR
-    out_sugar_dir = PROJECT_ROOT / "outputs" / "sugar" / statue_class / model_id
-    if not skip_sugar:
-        print(f"\n--- Melatih SuGaR untuk {statue_class}/{model_id} ---")
-        sugar_logger = ThesisLogger(statue_class=statue_class, model_id=model_id, method="SuGaR")
-        try:
-            train_sugar_pipeline(
-                scene_path=str(scene_dir),
-                checkpoint_3dgs=str(out_3dgs_dir),
-                output_base_dir=str(out_sugar_dir),
-                regularization_type="dn_consistency",
-                refinement_time=refinement_time,
-                n_vertices=250000,
-                gpu=gpu,
-                logger=sugar_logger
-            )
-            sugar_logger.finalize(success=True)
-        except Exception as e:
-            print(f"Pelatihan SuGaR Gagal: {str(e)}")
-            sugar_logger.finalize(success=False)
-            return
-    else:
-        print(f"Pelatihan SuGaR dilewati.")
-
-    print(f"\nSELESAI MEMPROSES: {statue_class} - {model_id}!")
+def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
+                         skip_3dgs=False, skip_sugar=False, refinement_time="short",
+                         gpu=0, use_gpu_colmap=False, resume=True, vertices=250000,
+                         skip_evaluation=False, root=PROJECT_ROOT):
+    scene_dir, root = Path(scene_dir), Path(root)
+    if not has_data(scene_dir):
+        print(f"[SKIP] {statue_class}/{model_id}: belum ada foto/video.", flush=True)
+        return "SKIPPED"
+    common = ["--statue_class", statue_class, "--model_id", model_id]
+    out_3dgs = root / "outputs" / "3dgs" / statue_class / model_id
+    out_sugar = root / "outputs" / "sugar" / statue_class / model_id
+    if not media_files(scene_dir / "input") and not media_files(scene_dir / "images"):
+        video = media_files(scene_dir / "raw_video", VIDEO_EXTENSIONS)[0]
+        run_stage("01_extract_frames.py", ["-v", video, "-o", scene_dir / "input", *common], root)
+        if not media_files(scene_dir / "input"):
+            raise RuntimeError("Tidak ada frame yang lolos filter ketajaman.")
+    if skip_colmap:
+        if not has_colmap_model(scene_dir):
+            raise RuntimeError("--skip_colmap aktif tetapi model COLMAP belum lengkap.")
+    elif not (resume and has_colmap_model(scene_dir)):
+        run_stage("02_run_colmap.py", ["-s", scene_dir, *common, '--gpu', gpu,
+                  *(["--use_gpu"] if use_gpu_colmap else [])], root)
+    if not has_colmap_model(scene_dir):
+        raise RuntimeError("Model COLMAP atau images/ hasil undistorsi tidak lengkap.")
+    trained_3dgs = False
+    if skip_3dgs:
+        if not has_checkpoint(out_3dgs, 7000) or not has_checkpoint(out_3dgs, 30000):
+            raise RuntimeError("--skip_3dgs memerlukan checkpoint 7000 dan 30000 yang lengkap.")
+    elif not (resume and has_checkpoint(out_3dgs, 7000) and has_checkpoint(out_3dgs, 30000)):
+        run_stage("03_train_3dgs.py", ["-s", scene_dir, *common, "--gpu", gpu], root)
+        trained_3dgs = True
+    trained_sugar = False
+    sugar_matches = False
+    if has_sugar_result(out_sugar):
+        config = json.loads((out_sugar / 'pipeline_result.json').read_text(encoding='utf-8'))
+        sugar_matches = (config.get('target_triangles') == vertices and config.get('regularization') == 'dn_consistency'
+                         and config.get('refinement_iterations') == {'short': 2000, 'medium': 7000, 'long': 15000}[refinement_time])
+    if not skip_sugar and not (resume and not trained_3dgs and sugar_matches):
+        run_stage("04_train_sugar.py", ["-s", scene_dir, "-c", out_3dgs, *common,
+                  "--gpu", gpu, "--refinement_time", refinement_time, "--vertices", vertices], root)
+        trained_sugar = True
+    if not skip_evaluation:
+        for method, output, retrained in (("3DGS", out_3dgs, trained_3dgs), ("SuGaR", out_sugar, trained_sugar)):
+            if method == "SuGaR" and skip_sugar:
+                continue
+            if not (resume and not retrained and has_evaluation(output)):
+                run_stage("06_evaluate_rendering.py", [*common, "--method", method, "--gpu", gpu], root)
+    return "COMPLETED"
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Master Batch Automation Runner untuk seluruh 16 patung Bali.")
-    parser.add_argument("--class_name", "-c", type=str, default=None, choices=CLASSES, help="Nama kelas patung tertentu (default: semua kelas).")
-    parser.add_argument("--model_id", "-m", type=str, default=None, help="ID model tertentu (misal: model_01).")
-    parser.add_argument("--skip_colmap", action="store_true", help="Lewati tahap COLMAP jika sudah pernah dijalankan.")
-    parser.add_argument("--skip_3dgs", action="store_true", help="Lewati tahap 3DGS jika sudah selesai.")
-    parser.add_argument("--skip_sugar", action="store_true", help="Lewati tahap SuGaR.")
-    parser.add_argument("--refinement_time", type=str, default="short", choices=["short", "medium", "long"], help="Waktu refine SuGaR (default: short).")
-    parser.add_argument("--gpu", type=int, default=0, help="ID GPU (default: 0).")
-
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--class_name", "-c", choices=list(CATALOG))
+    parser.add_argument("--model_id", "-m")
+    for flag in ("skip_colmap", "skip_3dgs", "skip_sugar", "skip_evaluation", "no_resume", "use_gpu_colmap"):
+        parser.add_argument("--" + flag, action="store_true")
+    parser.add_argument("--refinement_time", choices=["short", "medium", "long"], default="short")
+    parser.add_argument("--vertices", type=int, default=250000)
+    parser.add_argument("--gpu", type=int, default=0)
     args = parser.parse_args()
-    datasets_root = PROJECT_ROOT / "datasets"
-
-    classes_to_run = [args.class_name] if args.class_name else CLASSES
-
-    for cls in classes_to_run:
-        class_folder = datasets_root / cls
-        if not class_folder.exists():
-            continue
-
-        models_in_class = [args.model_id] if args.model_id else [f.name for f in class_folder.iterdir() if f.is_dir()]
-        for mdl in sorted(models_in_class):
-            model_folder = class_folder / mdl
-            if model_folder.is_dir():
-                process_single_statue(
-                    scene_dir=model_folder,
-                    statue_class=cls,
-                    model_id=mdl,
-                    skip_colmap=args.skip_colmap,
-                    skip_3dgs=args.skip_3dgs,
-                    skip_sugar=args.skip_sugar,
-                    refinement_time=args.refinement_time,
-                    gpu=args.gpu
-                )
+    if args.gpu < 0 or args.vertices < 1000:
+        parser.error("GPU harus >= 0 dan target mesh >= 1000.")
+    try:
+        pairs = scene_pairs(args.class_name or "", args.model_id or "")
+    except ValueError as exc:
+        parser.error(str(exc))
+    results = []
+    for cls, mdl in pairs:
+        print(f"\n[MODEL] {cls}/{mdl}", flush=True)
+        try:
+            status = process_single_statue(PROJECT_ROOT / "datasets" / cls / mdl, cls, mdl,
+                skip_colmap=args.skip_colmap, skip_3dgs=args.skip_3dgs, skip_sugar=args.skip_sugar,
+                refinement_time=args.refinement_time, gpu=args.gpu, use_gpu_colmap=args.use_gpu_colmap,
+                resume=not args.no_resume, vertices=args.vertices, skip_evaluation=args.skip_evaluation)
+            results.append({"target": f"{cls}/{mdl}", "status": status})
+        except Exception as exc:
+            print(f"[ERROR] {cls}/{mdl}: {exc}", flush=True)
+            results.append({"target": f"{cls}/{mdl}", "status": "FAILED", "error": str(exc)})
+    print("[BATCH SUMMARY] " + json.dumps(results), flush=True)
+    return 1 if any(item["status"] == "FAILED" for item in results) else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

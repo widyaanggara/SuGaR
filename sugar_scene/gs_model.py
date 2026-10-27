@@ -1,5 +1,6 @@
 import sys
-sys.path.append('./gaussian_splatting')
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent / 'gaussian_splatting'))
 import os
 import torch
 import plotly.graph_objs as go
@@ -220,12 +221,12 @@ class GaussianSplattingWrapper:
             image = render_pkg["render"]
             return image.permute(1, 2, 0)
     
-    def get_gt_image(self, camera_indices:int, to_cuda=False):
+    def get_gt_image(self, camera_indices:int, to_cuda=True):
         """Returns the ground truth image corresponding to the training camera at the given index.
 
         Args:
             camera_indices (int): Index of the camera in the set of cameras.
-            to_cuda (bool, optional): If True, moves the image to GPU. Defaults to False.
+            to_cuda (bool, optional): If True, moves the image to GPU. Defaults to True.
 
         Returns:
             Tensor: The ground truth image.
@@ -329,4 +330,3 @@ class GaussianSplattingWrapper:
 
             # fig.show()
             return fig
-        

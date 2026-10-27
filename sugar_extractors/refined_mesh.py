@@ -8,6 +8,7 @@ from pytorch3d.io import save_obj
 from sugar_scene.gs_model import GaussianSplattingWrapper
 from sugar_scene.sugar_model import SuGaR, extract_texture_image_and_uv_from_gaussians
 from sugar_utils.spherical_harmonics import SH2RGB
+from sugar_utils.artifact_paths import refined_assets
 
 from rich.console import Console
 
@@ -28,9 +29,9 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     
     # --- Fine model parameters ---
     refined_model_path = args.refined_model_path
-    norm_refined_path = os.path.normpath(refined_model_path).replace('\\', '/').rstrip('/')
-    refined_parts = [p for p in norm_refined_path.split('/') if p]
-    refined_folder_name = refined_parts[-1] if refined_parts else 'model'
+    refined_folder_name, sugar_mesh_path = refined_assets(
+        refined_model_path, source_path, getattr(args, 'coarse_mesh_path', None))
+    sugar_mesh_path = str(sugar_mesh_path)
 
     if args.n_gaussians_per_surface_triangle is None:
         n_gaussians_per_surface_triangle = int(refined_folder_name.split('_gaussperface')[-1])
@@ -53,8 +54,6 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     mesh_save_path = mesh_save_path + '.obj'
     mesh_save_path = os.path.join(mesh_output_dir, mesh_save_path)
     
-    sugar_mesh_path = os.path.join('./output/coarse_mesh/', scene_name, 
-                                refined_folder_name.split('_normalconsistency')[0].replace('sugarfine', 'sugarmesh') + '.ply')
     
     if args.square_size is None:
         if n_gaussians_per_surface_triangle == 1:
@@ -110,6 +109,8 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     
     # --- Loading coarse mesh ---
     o3d_mesh = o3d.io.read_triangle_mesh(sugar_mesh_path)
+    if not o3d_mesh.has_triangles():
+        raise ValueError(f'Coarse mesh kosong atau tidak valid: {sugar_mesh_path}')
     
     # --- Loading refined SuGaR model ---
     checkpoint = torch.load(refined_model_path, map_location=nerfmodel.device)

@@ -1,190 +1,214 @@
-# Panduan Setup & Eksekusi Workspace di Windows 11 Pro
-**Riset Skripsi: Komparasi 3DGS vs SuGaR pada 8 Kelas Patung Bali**
+# Panduan Setup SuGaR di WSL Ubuntu 22.04
 
-Dokumen ini disusun khusus untuk spesifikasi PC Anda:
-* **OS**: Windows 11 Pro
-* **CPU**: AMD Ryzen 7 8700G (8 Cores, 16 Threads)
-* **GPU**: NVIDIA GeForce RTX 4060 Ti (16 GB VRAM)
-* **RAM**: 64 GB
-* **Storage**: Samsung SSD 990 Pro 1 TB
+**Riset skripsi: komparasi 3DGS vs SuGaR pada 16 togog Bali dan 2 sampel Tanks and Temples**
 
----
+Panduan ini untuk server Windows dengan Ubuntu 22.04 yang berjalan di WSL 2. Gunakan spesifikasi GPU server yang benar-benar ditampilkan oleh `nvidia-smi`; GPU laptop lokal tidak menjadi acuan. Untuk struktur lengkap 18 dataset, antrean dashboard, dan akses dari komputer lain, lihat [panduan operasional server](RUN_SERVER.md).
 
-## 1. Persiapan Struktur Folder (Langkah Pertama)
+## 1. Masuk ke akun kerja Ubuntu
 
-Sebelum memulai, jalankan skrip inisialisasi folder di terminal (atau *double-click* file `setup_workspace.bat` di Windows Explorer):
+Buka aplikasi Ubuntu. Berpindah ke akun kerja yang sudah disiapkan:
+
 ```bash
-python pipeline_tools/init_dataset_folders.py
-```
-Perintah ini akan membuat folder untuk seluruh 8 kelas patung di `datasets/` dan folder hasil di `outputs/`.
-
----
-
-## 2. Pilihan Instalasi Lingkungan (Environment)
-
-### OPSI A: Menggunakan WSL 2 Ubuntu 22.04 (SANGAT DIREKOMENDASIKAN ⭐⭐⭐⭐⭐)
-*Mengapa WSL2? Karena seluruh pustaka grafika 3D (PyTorch3D, nvdiffrast, CUDA rasterizer) dirancang native untuk Linux. Driver NVIDIA Windows 11 otomatis mengekspos GPU RTX 4060 Ti ke dalam WSL2 tanpa instalasi driver tambahan, serta 100% bebas dari galat kompilator Visual Studio MSVC.*
-
-#### Langkah A1: Install WSL 2 (Sekali Saja)
-1. Buka **PowerShell** sebagai Administrator di Windows 11.
-2. Jalankan perintah:
-   ```powershell
-   wsl --install -d Ubuntu-22.04
-   ```
-3. Restart PC jika diminta, lalu buka aplikasi **Ubuntu 22.04** dari Start Menu dan buat *username* serta *password*.
-
-#### Langkah A2: Akses Folder Project dari Ubuntu
-Di dalam terminal Ubuntu, folder project Anda di Windows dapat diakses langsung via `/mnt/c/`:
-```bash
-cd "/mnt/c/Users/anggara/Documents/Mata Kuliah Kampus/Mata Kuliah Semester 7/Skripsi/Project/SuGaR"
+su anggara
 ```
 
-#### Langkah A3: Install Miniconda di Ubuntu WSL
+Masukkan password akun Linux saat diminta. Setelah berhasil, pindah ke home akun tersebut:
+
 ```bash
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh -b
-~/miniconda3/bin/conda init bash
-source ~/.bashrc
+cd ~
+whoami
+pwd
 ```
 
-#### Langkah A4: Buat Environment Conda `sugar`
+`whoami` seharusnya menampilkan `anggara`, dan `pwd` biasanya menampilkan `/home/anggara`. Jalankan perintah proyek setelah masuk ke akun ini dan berada di home-nya.
+
+## 2. Pastikan WSL, Ubuntu, dan GPU siap
+
+Dari PowerShell Windows, pastikan distro Ubuntu menggunakan WSL 2:
+
+```powershell
+wsl --list --verbose
+```
+
+Distro `Ubuntu-22.04` harus menunjukkan versi `2`. Lalu buka terminal Ubuntu dan jalankan:
+
 ```bash
-# 1. Buat environment Python 3.9
-conda create -n sugar python=3.9 -y
+lsb_release -a
+uname -r
+nvidia-smi
+```
+
+`lsb_release` seharusnya menunjukkan Ubuntu 22.04. `nvidia-smi` harus menampilkan GPU NVIDIA pada server. Pasang atau perbarui driver NVIDIA di Windows jika GPU belum terlihat. **Jangan memasang driver NVIDIA Linux di dalam WSL**; WSL menggunakan driver dari Windows.
+
+## 3. Siapkan Ubuntu
+
+Pasang compiler C++, Git, COLMAP, dan pustaka sistem yang diperlukan:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake git wget curl ffmpeg colmap libgl1 libglib2.0-0
+```
+
+### Masuk ke folder proyek
+
+Setelah `cd ~`, lihat folder kerja yang tersedia:
+
+```bash
+ls -la
+```
+
+Masuk ke folder SuGaR yang disediakan di home, misalnya:
+
+```bash
+cd ~/SuGaR
+```
+
+Pastikan folder tersebut berisi `README.md`, `environment.yml`, dan `pipeline_tools/`:
+
+```bash
+ls
+```
+
+Jika nama atau lokasi folder yang disiapkan berbeda, gunakan path yang diberikan teman Anda. Jalankan perintah instalasi dari folder utama proyek ini.
+
+## 4. Pasang Conda dan environment proyek
+
+Jika Conda belum tersedia di Ubuntu, pasang Miniconda:
+
+```bash
+cd "$HOME"
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+bash miniconda.sh
+```
+
+Ikuti installer, izinkan `conda init`, lalu tutup dan buka lagi terminal Ubuntu. Masuk ke folder proyek dan buat environment dari file proyek:
+
+```bash
+conda --version
+conda env list
+```
+
+Jika environment `sugar` belum ada, buat dari file proyek:
+
+```bash
+conda env create -f environment.yml
+```
+
+Environment ini mengunci kombinasi yang dipakai kode: Python 3.9, PyTorch 2.0.1, CUDA 11.8, dan PyTorch3D 0.7.4. Jangan menaikkan versi PyTorch/CUDA secara terpisah dulu karena extension CUDA proyek dibangun terhadap kombinasi ini.
+
+Tambahkan CUDA Toolkit 11.8 ke environment agar `nvcc` tersedia untuk kompilasi extension. Paket Conda ini memasang toolkit di environment dan tidak memasang driver Linux ke WSL:
+
+```bash
+conda install -n sugar nvidia/label/cuda-11.8.0::cuda-toolkit -y
 conda activate sugar
-
-# 2. Install PyTorch 2.0.1 dengan CUDA 11.8
-conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia -y
-
-# 3. Install PyTorch3D & dependensi pendukung
-conda install -c fvcore -c iopath -c conda-forge fvcore iopath -y
-conda install -c pytorch3d pytorch3d -y
-pip install open3d opencv-python plyfile rich PyMCubes
-
-# 4. Install CUDA Rasterizer SuGaR
-cd gaussian_splatting/submodules/diff-gaussian-rasterization
-pip install -e .
-cd ../simple-knn
-pip install -e .
-cd ../../../
-
-# 5. (Opsional tapi direkomendasikan) Install Nvdiffrast untuk export tekstur kilat
-git clone https://github.com/NVlabs/nvdiffrast
-cd nvdiffrast
-pip install .
-cd ..
 ```
 
----
+OpenCV sudah tercantum di `environment.yml`. Jika memakai environment lama, tambahkan paket ekstraksi video dan build:
 
-### OPSI B: Native Windows 11 (Tanpa WSL)
-Jika Anda memilih menjalankan langsung di Windows 11:
-1. Pastikan terpasang **Visual Studio 2022 Community** dengan centang **Desktop development with C++**.
-2. Pastikan terpasang **CUDA Toolkit 11.8**.
-3. Di Anaconda Prompt Windows:
-   ```cmd
-   conda create -n sugar python=3.9 -y
-   conda activate sugar
-   conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia -y
-   pip install open3d opencv-python plyfile rich
-   pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py39_cu118_pyt201/download.html
-   ```
-4. Kompilasi submodule:
-   ```cmd
-   cd gaussian_splatting\submodules\diff-gaussian-rasterization
-   pip install -e .
-   cd ..\simple-knn
-   pip install -e .
-   cd ..\..\..
-   ```
-
----
-
-## 3. Alur Penggunaan Pipeline untuk Skripsi
-
-### Langkah 1: Tempatkan Data Foto / Video
-Sesuai SOP Lapangan, letakkan foto patung ke dalam folder:
-* Contoh: `datasets/Dewa/model_01/images/` (150–300 foto)
-* Jika ada video cadangan: `datasets/Dewa/model_01/raw_video/`
-* Jika ada point cloud LiDAR acuan: `datasets/Dewa/model_01/ground_truth/`
-
-### Langkah 2: Ekstraksi Video Cadangan (Jika Foto Langsung Kurang)
 ```bash
-python pipeline_tools/01_extract_frames.py -v datasets/Dewa/model_01/raw_video/DJI_001.MP4 -o datasets/Dewa/model_01/images --fps 2.0 --statue_class Dewa --model_id model_01
+python -m pip install opencv-python-headless==4.10.0.84
+python -m pip install ninja==1.11.1.1
 ```
 
-### Langkah 3: Menjalankan COLMAP (SfM)
+Pastikan versi compiler dan PyTorch terbaca:
+
 ```bash
-python pipeline_tools/02_run_colmap.py -s datasets/Dewa/model_01 --statue_class Dewa --model_id model_01
+nvcc --version
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA runtime:', torch.version.cuda); print('GPU tersedia:', torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'GPU tidak terdeteksi')"
 ```
 
-### Langkah 4: Melatih Model Baseline Vanilla 3DGS
+`GPU tersedia` harus bernilai `True` sebelum melanjutkan kompilasi extension.
+
+## 5. Pasang extension CUDA SuGaR
+
+Jalankan dari folder utama proyek dengan environment `sugar` aktif:
+
 ```bash
-python pipeline_tools/03_train_3dgs.py -s datasets/Dewa/model_01 --statue_class Dewa --model_id model_01 --iterations 30000
+python -m pip install --no-build-isolation -e ./gaussian_splatting/submodules/diff-gaussian-rasterization
+python -m pip install --no-build-isolation -e ./gaussian_splatting/submodules/simple-knn
 ```
-*Hasil akan tersimpan rapi di: `outputs/3dgs/Dewa/model_01/`*
 
-### Langkah 5: Melatih Model SuGaR (Cepat & Bebas Error Memori)
+Nvdiffrast bersifat opsional. Untuk instalasi awal, lewati paket ini dan gunakan PyTorch3D. Jika diperlukan, gunakan versi terkunci berikut; jangan memasang branch terbaru ke environment PyTorch 2.0.1:
+
 ```bash
-python pipeline_tools/04_train_sugar.py -s datasets/Dewa/model_01 -c outputs/3dgs/Dewa/model_01 --statue_class Dewa --model_id model_01 --refinement_time short
+python -m pip install --no-build-isolation 'git+https://github.com/NVlabs/nvdiffrast.git@v0.3.3'
 ```
-*Dengan parameter `--refinement_time short`, tahap refinement hanya berlangsung sekitar 8–10 menit (bukan 2–3 hari).*
-*Hasil mesh OBJ dan tekstur tersimpan di: `outputs/sugar/Dewa/model_01/textured_mesh/`*
 
-### Langkah 6: Menghitung Metrik Evaluasi untuk Skripsi (dengan Auto-ICP)
+Kode menggunakan backend CUDA Nvdiffrast, sehingga tidak memerlukan konteks OpenGL. Untuk memaksa PyTorch3D, jalankan `export SUGAR_RASTERIZER=pytorch3d` sebelum memulai pipeline.
+
+## 6. Siapkan folder data dan hasil
+
 ```bash
-python pipeline_tools/05_evaluate_comparison.py --statue_class Dewa --model_id model_01 --method SuGaR --model_path outputs/sugar/Dewa/model_01/textured_mesh/model.obj --gt_lidar datasets/Dewa/model_01/ground_truth/lidar.ply
+bash setup_workspace.sh
 ```
-*Skrip ini otomatis menjalankan **Auto-ICP Registration** untuk merapatkan posisi model ke LiDAR sebelum menghitung Chamfer Distance, dan otomatis menyimpan model hasil selaras di `outputs/logs/evaluation_reports/Dewa_model_01_SuGaR_aligned.ply` (bisa dibuka di Blender untuk gambar visual Bab 4).*
-*Jika Anda ingin menyetel faktor pengali skala secara manual, cukup tambahkan argumen `--scale_factor <nilai>`.*
 
----
+Letakkan data setiap patung dengan susunan seperti berikut:
 
-## 4. Eksekusi Otomatis Semalam untuk Seluruh 16 Patung (Batch Runner)
+```text
+datasets/Dewa/model_01/input/        # foto asli untuk COLMAP
+datasets/Dewa/model_01/images/       # hasil undistorsi COLMAP (otomatis)
+datasets/Dewa/model_01/raw_video/    # video opsional
+datasets/Dewa/model_01/ground_truth/ # point cloud LiDAR opsional
+```
 
-Anda tidak perlu menunggu patung satu per satu di depan layar. Cukup jalankan perintah ini sebelum tidur:
+## 7. Jalankan pipeline satu model
+
+Contoh berikut menjalankan seluruh tahap untuk `Dewa/model_01`.
+
+### Ekstrak frame video (opsional)
+
 ```bash
-python pipeline_tools/batch_run_all.py
+python pipeline_tools/01_extract_frames.py \
+  -v datasets/Dewa/model_01/raw_video/DJI_001.MP4 \
+  -o datasets/Dewa/model_01/input \
+  --fps 2.0 --statue_class Dewa --model_id model_01
 ```
-Perintah ini akan:
-1. Memindai seluruh kelas (`Dewa`, `Dewi`, `Mitologi`, dst.) di folder `datasets/`.
-2. Menjalankan COLMAP $\rightarrow$ Vanilla 3DGS $\rightarrow$ SuGaR secara berurutan.
-3. Mencatat seluruh performa komputasi, durasi, dan puncak VRAM ke file log.
 
----
+### Jalankan COLMAP
 
-## 5. Menjalankan Web Dashboard Interaktif (Localhost GUI)
+```bash
+python pipeline_tools/02_run_colmap.py \
+  -s datasets/Dewa/model_01 --statue_class Dewa --model_id model_01
+```
 
-Jika Anda ingin memantau progres dan menjalankan pelatihan menggunakan antarmuka grafis (UI website lokal) tanpa mengetik perintah di terminal:
+COLMAP memakai CPU secara default agar kompatibel dengan paket Ubuntu yang tidak menyertakan dukungan CUDA. Jika binary COLMAP Anda mendukung CUDA, tambahkan `--use_gpu`. Pelatihan 3DGS dan SuGaR tetap memakai GPU.
 
-### Cara Menjalankan:
-1. **Opsi 1 (Double-Click)**: Cukup klik ganda file `start_dashboard.bat` di folder utama proyek.
-2. **Opsi 2 (Terminal)**:
-   ```bash
-   python web_dashboard/server.py
-   ```
-3. Browser Anda akan terbuka secara otomatis di alamat: **`http://localhost:8080`**
+### Latih Vanilla 3DGS dan SuGaR
 
-### Fitur Utama Web Dashboard:
-* **Katalog 8 Tipologi Patung**: Menampilkan 16 model patung lengkap dengan indikator foto, ketersediaan video, dan file LiDAR.
-* **Indikator Status Real-Time**: Status pengerjaan COLMAP, Vanilla 3DGS (7k & 30k), dan SuGaR (Mesh & OBJ) termonitor live.
-* **Tombol Per-Step Pipeline**: Setiap model memiliki tombol eksekusi per tahap:
-  - `1. Extract Frames` (tampil otomatis jika ada video cadangan).
-  - `2. COLMAP` — Structure from Motion.
-  - `3. Train 3DGS` — Baseline Vanilla 3DGS.
-  - `4. Train SuGaR` — Mesh extraction & refinement.
-  - `5. Evaluate` — Metrik kuantitatif + Auto-ICP.
-  - `Run Full Pipeline` — Menjalankan seluruh tahap secara berurutan.
-* **Batch Runner**: Tombol `Run All 16 Models` di header untuk menjalankan seluruh 16 model secara berurutan.
-* **Terminal Konsol Real-time**: Menampilkan output eksekusi baris-demi-baris dengan auto-scroll dan tombol pembatalan.
-* **Galeri Visual Preview & Lightbox**: Menampilkan hasil render 3DGS dan textured mesh SuGaR secara otomatis setelah model selesai dilatih, lengkap dengan modal pembesar (lightbox).
-* **Tabel Metrik Terintegrasi**: Membaca otomatis metrik skripsi (PSNR, SSIM, LPIPS, Chamfer Distance, VRAM, Durasi) lengkap dengan opsi ekspor ke file CSV/Excel.
+```bash
+python pipeline_tools/03_train_3dgs.py \
+  -s datasets/Dewa/model_01 --statue_class Dewa --model_id model_01 --iterations 30000
 
----
+python pipeline_tools/04_train_sugar.py \
+  -s datasets/Dewa/model_01 \
+  -c outputs/3dgs/Dewa/model_01 \
+  --statue_class Dewa --model_id model_01 --refinement_time short
+```
 
-## 6. Melihat Hasil Rekapitulasi Data Skripsi
+Hasil 3DGS berada di `outputs/3dgs/Dewa/model_01/`, sedangkan hasil SuGaR berada di `outputs/sugar/Dewa/model_01/`.
 
-Setiap kali proses selesai, tabel ringkasan metrik skripsi Anda otomatis diperbarui di:
-* **Format CSV**: `outputs/logs/evaluation_reports/summary_comparison.csv` *(Buka di Excel untuk membuat diagram perbandingan)*
-* **Format Markdown**: `outputs/logs/evaluation_reports/summary_comparison.md` *(Langsung copy-paste ke Bab 4 Hasil dan Pembahasan Skripsi)*
+### Evaluasi dengan point cloud LiDAR (opsional)
 
+```bash
+python pipeline_tools/05_evaluate_comparison.py \
+  --statue_class Dewa --model_id model_01 --method SuGaR \
+  --model_path outputs/sugar/Dewa/model_01/textured_mesh/<nama-file-obj-hasil>.obj \
+  --gt_lidar datasets/Dewa/model_01/ground_truth/lidar.ply \
+  --scale_factor 1.0
+```
+
+Ganti nama file dengan OBJ yang benar-benar dihasilkan di folder `textured_mesh/`. Ganti `1.0` dengan faktor kalibrasi yang diperoleh dari ukuran nyata objek dan ukuran model. Jangan gunakan nilai tanpa kalibrasi; skala rekonstruksi COLMAP dari satu kamera bergerak tidak otomatis sama dengan meter.
+
+## 8. Jalankan dashboard
+
+Dengan environment `sugar` aktif, jalankan:
+
+```bash
+bash start_dashboard.sh 8080
+```
+
+Buka `http://localhost:8080` di browser Windows. Hentikan server dengan `Ctrl+C` di terminal Ubuntu.
+
+Ringkasan evaluasi tersimpan di `outputs/logs/evaluation_reports/summary_comparison.csv` dan `summary_comparison.md`.
+
+Dashboard sekarang mendukung 18 model dan antrean persisten satu worker. Pipeline lengkap menjalankan ekstraksi opsional, COLMAP, 3DGS, SuGaR, serta evaluasi PSNR/SSIM/LPIPS kedua metode. Evaluasi LiDAR tetap opsional dan memerlukan skala terkalibrasi. Ikuti [RUN_SERVER.md](RUN_SERVER.md) untuk menjalankan semua model dan memahami jeda/lanjut/stop.

@@ -1,5 +1,6 @@
 from typing import Union
 import torch
+import os
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import RasterizationSettings as P3DRasterizationSettings
 from pytorch3d.renderer import MeshRasterizer as P3DMeshRasterizer
@@ -50,6 +51,8 @@ class MeshRasterizer(torch.nn.Module):
         
         if not nvdiffrast_available:
             use_nvdiffrast = False
+        if os.environ.get('SUGAR_RASTERIZER', 'auto') == 'pytorch3d':
+            use_nvdiffrast = False
         self.use_nvdiffrast = use_nvdiffrast
         
         # Get height and width if provided in cameras
@@ -99,7 +102,7 @@ class MeshRasterizer(torch.nn.Module):
             raise ValueError("cameras must be either CamerasWrapper, P3DCameras, GSCamera or list of GSCamera")
         
         if self.use_nvdiffrast:
-            self.gl_context = dr.RasterizeGLContext()
+            self.gl_context = dr.RasterizeCudaContext(device=torch.cuda.current_device())
         else:
             self._p3d_mesh_rasterizer = P3DMeshRasterizer(
                 cameras=self.cameras.p3d_cameras,

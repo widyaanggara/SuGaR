@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import argparse
+import math
 import numpy as np
 from pathlib import Path
 
@@ -17,13 +18,6 @@ try:
 except ImportError:
     O3D_AVAILABLE = False
 
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-
-
 def align_point_clouds_icp(source_pcd, target_pcd, max_correspondence_distance: float = 0.05):
     """
     Menyelaraskan posisi dan rotasi source point cloud ke target LiDAR
@@ -35,6 +29,8 @@ def align_point_clouds_icp(source_pcd, target_pcd, max_correspondence_distance: 
     # 1. Samakan pusat massa (Centroid Alignment)
     source_center = source_pcd.get_center()
     target_center = target_pcd.get_center()
+    centroid_transform = np.identity(4)
+    centroid_transform[:3, 3] = target_center - source_center
     source_pcd.translate(target_center - source_center)
 
     # 2. Estimasi normal jika belum ada
@@ -51,9 +47,11 @@ def align_point_clouds_icp(source_pcd, target_pcd, max_correspondence_distance: 
         o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=200)
     )
 
+    if reg_p2l.fitness < 0.1 or not math.isfinite(reg_p2l.inlier_rmse):
+        raise ValueError(f"Registrasi ICP tidak memadai (fitness={reg_p2l.fitness:.4f}). Periksa skala, orientasi, dan area objek.")
     # Terapkan transformasi hasil ICP
     source_aligned = source_pcd.transform(reg_p2l.transformation)
-    return source_aligned, reg_p2l.transformation, reg_p2l.inlier_rmse
+    return source_aligned, reg_p2l.transformation @ centroid_transform, reg_p2l.inlier_rmse
 
 
 def compute_chamfer_distance(source_pcd_path: str, 
@@ -69,8 +67,12 @@ def compute_chamfer_distance(source_pcd_path: str,
     if not O3D_AVAILABLE:
         raise ImportError("Pustaka Open3D belum terinstall. Jalankan: pip install open3d")
 
-    # Load data
-    src = o3d.io.read_point_cloud(str(source_pcd_path))
+    # Fixed sampling seed makes repeated runs comparable. Meshes are sampled on
+    # triangle surfaces, rather than comparing only their vertices.
+    o3d.utility.random.seed(0)
+    mesh = o3d.io.read_triangle_mesh(str(source_pcd_path))
+    src = (mesh.sample_points_uniformly(number_of_points=max_samples) if mesh.has_triangles()
+           else o3d.io.read_point_cloud(str(source_pcd_path)))
     tgt = o3d.io.read_point_cloud(str(target_pcd_path))
 
     if len(src.points) == 0:
@@ -127,6 +129,10 @@ def compute_chamfer_distance(source_pcd_path: str,
     comp_5cm = np.mean(dists_tgt_to_src < 0.05) * 100.0
 
     return {
+        "sampling_seed": 0,
+        "max_samples": max_samples,
+        "icp_inlier_rmse_cm": icp_rmse_cm,
+        "alignment_transform": transformation.tolist() if apply_icp else None,
         "chamfer_distance_cm": round(float(chamfer_dist_cm), 4),
         "mean_accuracy_cm": round(float(mean_src_to_tgt * 100.0), 4),
         "mean_completeness_cm": round(float(mean_tgt_to_src * 100.0), 4),
@@ -144,7 +150,8 @@ def main():
     parser.add_argument("--method", type=str, default="SuGaR", choices=["3DGS", "SuGaR"], help="Metode yang dievaluasi.")
     parser.add_argument("--model_path", "-p", type=str, required=True, help="Path ke file model (.ply atau .obj).")
     parser.add_argument("--gt_lidar", "-g", type=str, default=None, help="Path ke point cloud LiDAR ground truth (.ply).")
-    parser.add_argument("--scale_factor", type=float, default=1.0, help="Faktor pengali skala metrik (default: 1.0).")
+    parser.add_argument("--scale_factor", type=float, default=None,
+                        help="Faktor kalibrasi untuk mengubah unit model menjadi meter; wajib jika --gt_lidar dipakai.")
     parser.add_argument("--no_icp", action="store_true", help="Nonaktifkan registrasi ICP otomatis.")
     parser.add_argument("--psnr", type=float, default=None, help="Nilai PSNR hasil evaluasi visual (dB).")
     parser.add_argument("--ssim", type=float, default=None, help="Nilai SSIM (0-1).")
@@ -156,11 +163,37 @@ def main():
     logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id, method=args.method)
     logger.log(f"Memulai evaluasi metrik untuk {args.method} - {args.statue_class}/{args.model_id}")
 
+    model_path = Path(args.model_path)
+    if not model_path.is_file():
+        logger.log(f"File model tidak ditemukan: {model_path}", level="error")
+        logger.finalize(success=False)
+        sys.exit(1)
+
+    if args.gt_lidar and not Path(args.gt_lidar).is_file():
+        logger.log(f"File LiDAR tidak ditemukan: {args.gt_lidar}", level="error")
+        logger.finalize(success=False)
+        sys.exit(1)
+
+    has_visual_metrics = any(value is not None for value in (args.psnr, args.ssim, args.lpips))
+    if not args.gt_lidar and not has_visual_metrics:
+        logger.log("Tidak ada evaluasi yang diminta. Berikan --gt_lidar atau setidaknya satu metrik visual.", level="error")
+        logger.finalize(success=False)
+        sys.exit(2)
+
+    if args.gt_lidar and args.scale_factor is None:
+        logger.log("--scale_factor wajib untuk evaluasi geometri agar skala model terkalibrasi ke meter.", level="error")
+        logger.finalize(success=False)
+        sys.exit(2)
+    if args.gt_lidar and (not math.isfinite(args.scale_factor) or args.scale_factor <= 0):
+        logger.log("--scale_factor harus berupa angka finite yang lebih besar dari 0.", level="error")
+        logger.finalize(success=False)
+        sys.exit(2)
+
     chamfer_cm = None
     geo_metrics = {}
 
     # 1. Evaluasi Geometri jika ada Ground Truth LiDAR
-    if args.gt_lidar and os.path.exists(args.gt_lidar):
+    if args.gt_lidar:
         logger.start_stage("Evaluasi_Geometri_LiDAR")
         aligned_out = PROJECT_ROOT / "outputs" / "logs" / "evaluation_reports" / f"{args.statue_class}_{args.model_id}_{args.method}_aligned.ply"
         try:
@@ -178,7 +211,15 @@ def main():
             logger.log(f"Akurasi (< 2cm): {geo_metrics['accuracy_at_2cm_pct']}%, Kelengkapan (< 2cm): {geo_metrics['completeness_at_2cm_pct']}%")
             logger.log(f"Akurasi (< 5cm): {geo_metrics['accuracy_at_5cm_pct']}%, Kelengkapan (< 5cm): {geo_metrics['completeness_at_5cm_pct']}%")
         except Exception as e:
-            logger.log(f"Gagal menghitung Chamfer Distance: {str(e)}", level="warning")
+            logger.log(f"Gagal menghitung Chamfer Distance: {str(e)}", level="error")
+            logger.end_stage("Evaluasi_Geometri_LiDAR")
+            logger.set_parameters({
+                "model_path": args.model_path,
+                "gt_lidar_path": args.gt_lidar,
+                "scale_factor_to_meters": args.scale_factor,
+            })
+            logger.finalize(success=False)
+            sys.exit(1)
         logger.end_stage("Evaluasi_Geometri_LiDAR")
 
     # 2. Rekam seluruh metrik ke file log skripsi
@@ -192,6 +233,7 @@ def main():
     logger.set_parameters({
         "model_path": args.model_path,
         "gt_lidar_path": args.gt_lidar,
+        "scale_factor_to_meters": args.scale_factor,
         "geometric_metrics_detail": geo_metrics
     })
 

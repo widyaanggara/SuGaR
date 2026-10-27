@@ -1,6 +1,7 @@
 import os
 import sys
-import shutil
+import json
+import gc
 import argparse
 from pathlib import Path
 
@@ -9,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from pipeline_tools.logger_utils import ThesisLogger
+from pipeline_tools.gpu_lock import gpu_lock
+from pipeline_tools.dataset_registry import has_checkpoint, has_colmap_model, file_signature
 
 
 def train_sugar_pipeline(scene_path: str,
@@ -31,7 +34,16 @@ def train_sugar_pipeline(scene_path: str,
     3. Refinement Training (dengan setting short / 2k iterasi agar tidak berhari-hari)
     4. Export Textured Mesh (.obj, .mtl, .png)
     """
-    from sugar_utils.general_utils import str2bool
+    if not has_colmap_model(scene_path) or not has_checkpoint(checkpoint_3dgs, 7000):
+        raise FileNotFoundError("Dataset COLMAP dan checkpoint 3DGS iterasi 7000 harus lengkap.")
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
+    os.environ.setdefault('SUGAR_IMAGE_DEVICE', 'cpu')
+    gpu = 0  # Physical GPU is now exposed as logical cuda:0.
+    import torch
+    if not torch.cuda.is_available():
+        raise RuntimeError('CUDA tidak tersedia di environment sugar.')
+    torch.cuda.set_device(0)
+    torch.cuda.reset_peak_memory_stats()
     from sugar_trainers.coarse_density import coarse_training_with_density_regularization
     from sugar_trainers.coarse_sdf import coarse_training_with_sdf_regularization
     from sugar_trainers.coarse_density_and_dn_consistency import coarse_training_with_density_regularization_and_dn_consistency
@@ -50,6 +62,9 @@ def train_sugar_pipeline(scene_path: str,
         checkpoint_3dgs += os.path.sep
 
     output_dir = Path(output_base_dir).resolve()
+    manifest_path = output_dir / 'pipeline_result.json'
+    if manifest_path.exists():
+        manifest_path.unlink()
     coarse_dir = output_dir / "coarse"
     mesh_dir = output_dir / "mesh"
     refined_dir = output_dir / "refined"
@@ -100,6 +115,8 @@ def train_sugar_pipeline(scene_path: str,
     if logger:
         logger.end_stage("SuGaR_01_Coarse_Optimization")
         logger.log(f"Coarse SuGaR tersimpan di: {coarse_sugar_path}")
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # ==================== 2. Mesh Extraction ====================
     if logger:
@@ -128,6 +145,8 @@ def train_sugar_pipeline(scene_path: str,
     if logger:
         logger.end_stage("SuGaR_02_Mesh_Extraction")
         logger.log(f"Poisson surface mesh tersimpan di: {coarse_mesh_path}")
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # ==================== 3. Refine SuGaR ====================
     if logger:
@@ -155,8 +174,11 @@ def train_sugar_pipeline(scene_path: str,
     if logger:
         logger.end_stage("SuGaR_03_Refinement")
         logger.log(f"Refined model tersimpan di: {refined_sugar_path}")
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # ==================== 4. Textured Mesh Extraction ====================
+    refined_mesh_path = None
     if export_obj:
         if logger:
             logger.start_stage("SuGaR_04_Textured_Mesh_Export")
@@ -166,6 +188,7 @@ def train_sugar_pipeline(scene_path: str,
             'iteration_to_load': 7000,
             'checkpoint_path': checkpoint_3dgs,
             'refined_model_path': refined_sugar_path,
+            'coarse_mesh_path': coarse_mesh_path,
             'mesh_output_dir': str(textured_dir),
             'n_gaussians_per_surface_triangle': gaussians_per_triangle,
             'square_size': 8,
@@ -181,12 +204,27 @@ def train_sugar_pipeline(scene_path: str,
             logger.end_stage("SuGaR_04_Textured_Mesh_Export")
             logger.log(f"Textured OBJ Mesh tersimpan di: {textured_dir}")
 
+    artifacts = {'coarse_checkpoint': coarse_sugar_path, 'coarse_mesh': coarse_mesh_path,
+                 'refined_checkpoint': refined_sugar_path, 'textured_mesh': refined_mesh_path}
+    for key, path in artifacts.items():
+        if path is not None and not Path(path).is_file():
+            raise FileNotFoundError(f"Hasil {key} tidak ditemukan: {path}")
+    manifest = {key: Path(path).resolve().relative_to(output_dir).as_posix() if path else None
+                for key, path in artifacts.items()}
+    manifest.update(regularization=regularization_type, refinement_iterations=refinement_iterations,
+                    target_triangles=n_vertices, gaussians_per_triangle=gaussians_per_triangle,
+                    white_background=white_background, scene_path=scene_path)
+    manifest['baseline_signature'] = file_signature(Path(checkpoint_3dgs) / 'point_cloud/iteration_7000/point_cloud.ply')
+    temporary = manifest_path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    temporary.replace(manifest_path)
+
     if logger:
         logger.log("Seluruh tahapan SuGaR berhasil diselesaikan!")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pelatihan SuGaR terstruktur bebas bug path dan hemat VRAM.")
+    parser = argparse.ArgumentParser(description="Pipeline SuGaR untuk satu model dataset.")
     parser.add_argument("--scene_path", "-s", type=str, required=True, help="Folder dataset (misal: datasets/Dewa/model_01).")
     parser.add_argument("--checkpoint_3dgs", "-c", type=str, required=True, help="Folder output 3DGS yang memuat checkpoint 7000.")
     parser.add_argument("--output_dir", "-o", type=str, default=None, help="Folder tujuan (default: outputs/sugar/<Kelas>/<Model_ID>).")
@@ -194,11 +232,13 @@ def main():
     parser.add_argument("--model_id", type=str, default="model_01", help="ID model patung.")
     parser.add_argument("--regularization", "-r", type=str, default="dn_consistency", choices=["dn_consistency", "density", "sdf"], help="Tipe regularisasi (default: dn_consistency).")
     parser.add_argument("--refinement_time", type=str, default="short", choices=["short", "medium", "long"], help="Waktu refinement (default: short / 2000 iterasi agar cepat dan aman VRAM).")
-    parser.add_argument("--vertices", type=int, default=250000, help="Jumlah target vertex mesh (default: 250000).")
+    parser.add_argument("--vertices", type=int, default=250000, help="Target segitiga saat decimation mesh (default: 250000; nama argumen dipertahankan).")
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU device (default: 0).")
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
 
     args = parser.parse_args()
+    if args.gpu < 0 or args.vertices < 1000:
+        parser.error("GPU harus >= 0 dan target mesh >= 1000.")
 
     if args.output_dir is None:
         output_dir = PROJECT_ROOT / "outputs" / "sugar" / args.statue_class / args.model_id
@@ -210,24 +250,29 @@ def main():
         "regularization": args.regularization,
         "refinement_time": args.refinement_time,
         "target_vertices": args.vertices,
-        "gpu": args.gpu
+        "gpu": args.gpu,
+        "phase": "training"
     })
+    logger.start_vram_monitor(os.getpid())
 
     try:
-        train_sugar_pipeline(
-            scene_path=args.scene_path,
-            checkpoint_3dgs=args.checkpoint_3dgs,
-            output_base_dir=str(output_dir),
-            regularization_type=args.regularization,
-            refinement_time=args.refinement_time,
-            n_vertices=args.vertices,
-            gpu=args.gpu,
-            white_background=args.white_background,
-            logger=logger
-        )
+        with gpu_lock(args.gpu):
+            train_sugar_pipeline(
+                scene_path=args.scene_path,
+                checkpoint_3dgs=args.checkpoint_3dgs,
+                output_base_dir=str(output_dir),
+                regularization_type=args.regularization,
+                refinement_time=args.refinement_time,
+                n_vertices=args.vertices,
+                gpu=args.gpu,
+                white_background=args.white_background,
+                logger=logger
+            )
+        logger.stop_vram_monitor()
         logger.finalize(success=True)
     except Exception as e:
         logger.log(f"Error pada pipeline SuGaR: {str(e)}", level="error")
+        logger.stop_vram_monitor()
         logger.finalize(success=False)
         sys.exit(1)
 

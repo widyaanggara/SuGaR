@@ -1,52 +1,21 @@
-# Panduan Penempatan Dataset Patung Bali (8 Kelas)
+# Input dataset penelitian
 
-Direktori ini disiapkan untuk menyimpan data akuisisi lapangan sesuai dengan SOP Pengambilan Data Lapangan CSBSI.
+Tersedia **18 model**: kelas `Dewa`, `Dewi`, `Mitologi`, `Penabuh`, `Pengapit`, `Punakawan`, `Raksasa`, dan `Wanara` masing-masing memiliki `model_01` dan `model_02`. Kelompok `TanksAndTemples` memiliki `tanks_and_temples_1` dan `tanks_and_temples_2`.
 
-## Struktur 8 Kelas Tipologi Patung
-
-Terdapat 8 kelas tipologi patung Bali, masing-masing memuat 2 model patung:
+Buat seluruh folder dengan `python pipeline_tools/init_dataset_folders.py` dari root proyek. Perintah ini mempertahankan data yang sudah ada.
 
 ```text
-datasets/
-├── Dewa/
-│   ├── model_01/
-│   └── model_02/
-├── Dewi/
-│   ├── model_01/
-│   └── model_02/
-├── Mitologi/
-│   ├── model_01/
-│   └── model_02/
-├── Penabuh/
-│   ├── model_01/
-│   └── model_02/
-├── Pengapit/
-│   ├── model_01/
-│   └── model_02/
-├── Punakawan/
-│   ├── model_01/
-│   └── model_02/
-├── Raksasa/
-│   ├── model_01/
-│   └── model_02/
-└── Wanara/
-    ├── model_01/
-    └── model_02/
+datasets/<kelas>/<model>/
+  input/          # Foto asli JPG/JPEG/PNG; nama unik, tanpa subfolder
+  raw_video/      # Video opsional untuk ekstraksi frame ke input/
+  ground_truth/   # lidar.ply opsional, dalam meter dan area objek yang sama
+  images/         # Dihasilkan COLMAP: foto undistorsi
+  distorted/      # Dihasilkan COLMAP: database/model sementara
+  sparse/0/       # Dihasilkan COLMAP: cameras, images, points3D
 ```
 
-## Struktur Subfolder di Dalam Setiap Model Patung
+Contoh: `datasets/Dewa/model_01/input/IMG_0001.JPG` dan `datasets/TanksAndTemples/tanks_and_temples_1/input/000001.jpg`.
 
-Untuk setiap model patung (misal: `datasets/Dewa/model_01/`), letakkan file sesuai perannya:
+Foto akuisisi lama pada `images/` masih didukung jika `input/` kosong. Jika tersedia model COLMAP siap pakai, isi `images/` serta tiga file model pada `sparse/0/`; pipeline memeriksa kelengkapan berkas sebelum melewati COLMAP. Simpan foto identitas sesi dan catatan lapangan di luar folder citra rekonstruksi.
 
-1. **`images/` (Data Utama - Wajib)**:
-   - Letakkan seluruh foto multi-view orbit O1, O2, O3, dan foto detail close-up (format `.jpg`, `.png`, atau `.JPG`).
-   - Sesuai SOP Bab 4.4, jumlah foto yang disarankan adalah 150–300 foto.
-   - Pastikan foto papan identitas sesi ditaruh di folder log terpisah, bukan di dalam `images/`.
-
-2. **`raw_video/` (Data Cadangan - Opsional)**:
-   - Jika Anda merekam video orbit 4K sebagai cadangan, letakkan file videonya (misal `DJI_0216.MP4`) di sini.
-   - Script `pipeline_tools/01_extract_frames.py` dapat mengekstrak video ini menjadi citra ke dalam folder `images/` secara otomatis jika foto langsung kurang/gagal.
-
-3. **`ground_truth/` (Acuan Geometri LiDAR - Opsional/Evaluasi)**:
-   - Letakkan file point cloud hasil pemindaian 3D LiDAR (format `.ply`) beserta informasi skala di sini.
-   - File ini digunakan oleh script `pipeline_tools/05_evaluate_comparison.py` untuk menghitung metrik akurasi geometri (Chamfer Distance).
+Lihat [RUN_SERVER.md](../RUN_SERVER.md) untuk antrean dashboard, output, dan protokol evaluasi.

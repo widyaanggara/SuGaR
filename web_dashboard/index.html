@@ -689,6 +689,14 @@
       pointer-events: none;
     }
     .toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+    .queue-settings { display:flex; flex-wrap:wrap; gap:14px; align-items:end; padding:16px; margin-bottom:18px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius); }
+    .queue-settings label { display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--text-3); }
+    .queue-settings input, .queue-settings select { background:var(--bg-3); color:var(--text-1); border:1px solid var(--border); padding:8px; border-radius:6px; max-width:180px; }
+    .queue-settings .checkbox-label { flex-direction:row; align-items:center; padding:8px; }
+    .dataset-path { color:var(--text-3); font-size:11px; line-height:1.7; overflow-wrap:anywhere; margin:10px 0; }
+    .model-label { overflow-wrap:anywhere; }
+    #queueSummary { font-size:12px; color:var(--text-3); margin-top:8px; }
+    .queue-section { margin-bottom:28px; }
   </style>
 </head>
 <body>
@@ -698,12 +706,12 @@
     <div class="topbar-left">
       <span class="topbar-title">3D Reconstruction Pipeline</span>
       <div class="topbar-sep"></div>
-      <span class="topbar-subtitle">Vanilla 3DGS vs SuGaR &mdash; 8 Tipologi Patung Bali</span>
+      <span class="topbar-subtitle">Vanilla 3DGS vs SuGaR &mdash; 16 Togog Bali + 2 Tanks and Temples</span>
     </div>
     <div class="topbar-right">
       <button class="btn btn-ghost btn-sm" onclick="refreshAll()">Refresh</button>
       <button id="btnStop" class="btn btn-danger btn-sm" onclick="triggerStop()" disabled>Stop</button>
-      <button id="btnRunAll" class="btn btn-primary btn-sm" onclick="triggerRun('full_pipeline','','')">Run All 16 Models</button>
+      <button id="btnRunAll" class="btn btn-primary btn-sm" onclick="triggerRun('full_pipeline','','')">Antrekan Semua 18 Model</button>
     </div>
   </div>
 
@@ -725,13 +733,13 @@
     <div class="stats-row">
       <div class="stat-card">
         <div class="stat-label">Total Models</div>
-        <div class="stat-value">16</div>
-        <div class="stat-sub">8 classes &times; 2 statues</div>
+        <div class="stat-value" id="kpiTotal">18</div>
+        <div class="stat-sub">8 kelas &times; 2 togog + 2 benchmark</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Completed</div>
-        <div class="stat-value" id="kpiCompleted" style="color:var(--green)">0 / 16</div>
-        <div class="stat-sub" id="kpiCompletedSub">3DGS + SuGaR finished</div>
+        <div class="stat-value" id="kpiCompleted" style="color:var(--green)">0 / 18</div>
+        <div class="stat-sub" id="kpiCompletedSub">Training + evaluasi visual selesai</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Avg PSNR</div>
@@ -741,11 +749,29 @@
       <div class="stat-card">
         <div class="stat-label">Avg Chamfer Dist</div>
         <div class="stat-value" id="kpiChamfer" style="color:var(--purple)">&mdash;</div>
-        <div class="stat-sub">Geometry accuracy (mm)</div>
+        <div class="stat-sub">Geometry accuracy (cm)</div>
       </div>
     </div>
 
     <!-- Class grid -->
+    <div class="queue-settings">
+      <label>GPU ID <input id="gpuId" type="number" min="0" value="0"></label>
+      <label>Refinement <select id="refinementTime"><option value="short">Short · 2.000 iterasi</option><option value="medium">Medium · 7.000 iterasi</option><option value="long">Long · 15.000 iterasi</option></select></label>
+      <label>Target segitiga mesh <input id="meshTriangles" type="number" min="1000" max="2000000" step="1000" value="250000"></label>
+      <label class="checkbox-label"><input id="resumeCompleted" type="checkbox" checked> Lewati tahap yang selesai</label>
+      <label>Metode LiDAR <select id="evaluationMethod"><option>SuGaR</option><option>3DGS</option></select></label>
+      <label>Skala LiDAR (meter/unit model) <input id="scaleFactor" type="number" min="0" step="any" placeholder="Hasil kalibrasi"></label>
+    </div>
+    <div class="table-section queue-section">
+      <div class="table-head">
+        <div><div class="section-title">Antrean · satu model berjalan</div><div id="queueSummary">Memuat antrean...</div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="btnPause" class="btn btn-ghost btn-sm">Jeda Antrean</button>
+          <button class="btn btn-ghost btn-sm" onclick="queueControl('cancel')">Batalkan Semua yang Menunggu</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Model</th><th>Pekerjaan</th><th>Status</th><th>Durasi</th><th>Aksi</th></tr></thead><tbody id="queueBody"></tbody></table></div>
+    </div>
     <div class="section-head">
       <div class="section-title">Pipeline Status by Class</div>
       <div class="filter-bar" id="filterBar">
@@ -768,17 +794,18 @@
       <div class="terminal-bar">
         <div class="terminal-bar-left">
           <div class="terminal-dots"><div class="tdot tdot-r"></div><div class="tdot tdot-y"></div><div class="tdot tdot-g"></div></div>
-          <span class="terminal-label">output</span>
+          <span class="terminal-label" id="termLabel">output</span>
           <span class="chip chip-pending" id="termStatus">idle</span>
         </div>
         <div class="terminal-bar-right">
           <label class="toggle-label"><input type="checkbox" id="chkScroll" checked> Auto-scroll</label>
           <button class="btn btn-ghost btn-sm" onclick="clearTerm()">Clear</button>
+          <button class="btn btn-ghost btn-sm" onclick="showLiveLogs()">Live</button>
           <button class="btn btn-ghost btn-sm" onclick="copyLogs()">Copy</button>
         </div>
       </div>
       <div class="terminal-output" id="termBody">
-        <div class="log-line l-dim">Ready. Select a model or click "Run All 16 Models" to start.</div>
+        <div class="log-line l-dim">Ready. Select a model or click "Antrekan Semua 18 Model" to start.</div>
       </div>
     </div>
 
@@ -802,9 +829,9 @@
               <th>PSNR (dB)</th>
               <th>SSIM</th>
               <th>LPIPS</th>
-              <th>Chamfer (mm)</th>
-              <th>Peak VRAM</th>
-              <th>Duration</th>
+              <th>Chamfer (cm)</th>
+              <th>Peak VRAM (GB)</th>
+              <th>Training (min)</th>
             </tr>
           </thead>
           <tbody id="metricsBody">
@@ -829,330 +856,6 @@
   <div class="lightbox-caption" id="lightboxCaption" onclick="event.stopPropagation()"></div>
 </div>
 
-<script>
-const STEPS = [
-  { key: 'extract_frames', label: '1. Extract Frames', needsVideo: true },
-  { key: 'colmap',         label: '2. COLMAP' },
-  { key: '3dgs',           label: '3. Train 3DGS' },
-  { key: 'sugar',          label: '4. Train SuGaR' },
-  { key: 'evaluate',       label: '5. Evaluate' },
-];
-
-let activeFilter = 'ALL';
-let isJobRunning = false;
-let cachedStatus = {};
-
-window.addEventListener('DOMContentLoaded', () => {
-  refreshAll();
-  setInterval(pollLogs, 2500);
-  setInterval(() => refreshStatus(false), 8000);
-});
-
-function refreshAll() {
-  refreshStatus(true);
-  refreshMetrics();
-}
-
-async function refreshStatus(feedback) {
-  try {
-    const r = await fetch('/api/status');
-    if (!r.ok) return;
-    cachedStatus = await r.json();
-    renderGrid(cachedStatus);
-    updateKpi(cachedStatus);
-    if (feedback) showToast('Status refreshed');
-  } catch(e) { console.error(e); }
-}
-
-async function refreshMetrics() {
-  try {
-    const r = await fetch('/api/metrics');
-    if (!r.ok) return;
-    renderTable(await r.json());
-  } catch(e) { console.error(e); }
-}
-
-function updateKpi(data) {
-  let done = 0;
-  for (const cls in data) for (const m in data[cls]) if (data[cls][m].overall_status === 'Completed') done++;
-  document.getElementById('kpiCompleted').textContent = done + ' / 16';
-  document.getElementById('kpiCompletedSub').textContent = done === 16 ? 'All models completed' : (16 - done) + ' remaining';
-}
-
-function renderGrid(data) {
-  const grid = document.getElementById('modelGrid');
-  grid.innerHTML = '';
-
-  for (const [cls, models] of Object.entries(data)) {
-    if (activeFilter !== 'ALL' && activeFilter !== cls) continue;
-
-    const card = document.createElement('div');
-    card.className = 'class-card';
-
-    let cells = '';
-    for (const [mdl, info] of Object.entries(models)) {
-      const imgChip = info.images_count > 0
-        ? `<span class="chip chip-done">${info.images_count} photos</span>`
-        : `<span class="chip chip-warn">No photos</span>`;
-      const colmapChip = info.colmap_done
-        ? `<span class="chip chip-done">Done</span>`
-        : `<span class="chip chip-pending">Pending</span>`;
-      const dgsChip = info['3dgs_30k']
-        ? `<span class="chip chip-done">30k iter</span>`
-        : (info['3dgs_7k'] ? `<span class="chip chip-partial">7k iter</span>` : `<span class="chip chip-pending">Pending</span>`);
-      const sugarChip = info.sugar_obj
-        ? `<span class="chip chip-done">OBJ ready</span>`
-        : (info.sugar_mesh ? `<span class="chip chip-partial">Mesh only</span>` : `<span class="chip chip-pending">Pending</span>`);
-
-      const extraInfo = [];
-      if (info.has_video) extraInfo.push('<span class="chip chip-partial">Video</span>');
-      if (info.has_gt_lidar) extraInfo.push('<span class="chip chip-partial">LiDAR GT</span>');
-
-      // Build extract frames button (conditional)
-      const extractBtn = info.has_video
-        ? `<button class="btn-step btn-full" onclick="triggerRun('extract_frames','${cls}','${mdl}')" ${isJobRunning ? 'disabled' : ''}>1. Extract Frames</button>`
-        : '';
-      const dis = isJobRunning ? 'disabled' : '';
-
-      cells += `
-        <div class="model-cell">
-          <div class="model-label">${mdl} ${extraInfo.join(' ')}</div>
-          <div class="pipeline-rows">
-            <div class="pipeline-row"><span>Dataset</span>${imgChip}</div>
-            <div class="pipeline-row"><span>COLMAP</span>${colmapChip}</div>
-            <div class="pipeline-row"><span>3DGS</span>${dgsChip}</div>
-            <div class="pipeline-row"><span>SuGaR</span>${sugarChip}</div>
-          </div>
-          <div class="step-buttons">
-            <button class="btn btn-primary btn-sm btn-full" onclick="triggerRun('full_pipeline','${cls}','${mdl}')" ${dis}>Run Full Pipeline</button>
-            <button class="btn-step" onclick="triggerRun('colmap','${cls}','${mdl}')" ${dis}>2. COLMAP</button>
-            <button class="btn-step" onclick="triggerRun('3dgs','${cls}','${mdl}')" ${dis}>3. Train 3DGS</button>
-            <button class="btn-step" onclick="triggerRun('sugar','${cls}','${mdl}')" ${dis}>4. Train SuGaR</button>
-            <button class="btn-step" onclick="triggerRun('evaluate','${cls}','${mdl}')" ${dis}>5. Evaluate</button>
-            ${extractBtn}
-          </div>
-          <div class="preview-box" id="preview-box-${cls}-${mdl}"></div>
-        </div>
-      `;
-    }
-
-    card.innerHTML = `
-      <div class="class-header">
-        <span class="class-name">${cls}</span>
-        <button class="btn btn-ghost btn-sm" onclick="triggerRun('full_pipeline','${cls}','')" ${isJobRunning ? 'disabled' : ''}>Run Class</button>
-      </div>
-      <div class="class-body">${cells}</div>
-    `;
-    grid.appendChild(card);
-  }
-  loadVisiblePreviews();
-}
-
-function filterClass(cls) {
-  activeFilter = cls;
-  document.querySelectorAll('.filter-pill').forEach(p => {
-    p.classList.toggle('active', p.textContent === cls || (cls === 'ALL' && p.textContent === 'All'));
-  });
-  renderGrid(cachedStatus);
-}
-
-async function triggerRun(action, cls, mdl) {
-  if (isJobRunning) { alert('A job is already running. Wait or stop it first.'); return; }
-
-  const target = cls && mdl ? `${cls}/${mdl}` : (cls ? `all models in ${cls}` : 'all 16 models');
-  if (!confirm(`Run "${action}" for ${target}?`)) return;
-
-  try {
-    const r = await fetch('/api/run', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ action, class_name: cls, model_id: mdl, gpu: 0 })
-    });
-    const d = await r.json();
-    if (!r.ok) alert(d.error || 'Failed to start');
-    else { pollLogs(); refreshStatus(false); }
-  } catch(e) { alert('Connection error: ' + e.message); }
-}
-
-async function triggerStop() {
-  if (!confirm('Stop the running job?')) return;
-  try { await fetch('/api/stop', {method:'POST'}); pollLogs(); } catch(e) { alert(e.message); }
-}
-
-async function pollLogs() {
-  try {
-    const r = await fetch('/api/logs');
-    if (!r.ok) return;
-    const d = await r.json();
-    isJobRunning = d.is_running;
-
-    const strip = document.getElementById('jobStrip');
-    const stopBtn = document.getElementById('btnStop');
-    const termChip = document.getElementById('termStatus');
-
-    if (d.is_running) {
-      strip.classList.remove('hidden');
-      document.getElementById('jobLabel').textContent = 'Running: ' + d.action;
-      document.getElementById('jobTarget').textContent = d.target || '';
-      document.getElementById('jobTimer').textContent = fmtSec(d.elapsed_seconds);
-      stopBtn.disabled = false;
-      termChip.textContent = 'running';
-      termChip.className = 'chip chip-partial';
-    } else {
-      strip.classList.add('hidden');
-      stopBtn.disabled = true;
-      const st = d.status || 'idle';
-      termChip.textContent = st.toLowerCase();
-      termChip.className = 'chip ' + (st === 'COMPLETED' ? 'chip-done' : st === 'ERROR' ? 'chip-warn' : 'chip-pending');
-    }
-
-    if (d.logs && d.logs.length > 0) renderLogs(d.logs);
-  } catch(e) { console.error(e); }
-}
-
-function renderLogs(logs) {
-  const el = document.getElementById('termBody');
-  const scroll = document.getElementById('chkScroll').checked;
-  el.innerHTML = '';
-  for (const line of logs) {
-    const div = document.createElement('div');
-    div.className = 'log-line';
-    if (line.includes('[SUCCESS]') || line.includes('BERHASIL')) div.classList.add('l-ok');
-    else if (line.includes('[ERROR]') || line.includes('GAGAL') || line.includes('Exception')) div.classList.add('l-err');
-    else if (line.includes('[WARNING]') || line.includes('WARN')) div.classList.add('l-warn');
-    else if (line.includes('[WEB RUNNER]') || line.includes('[THESIS')) div.classList.add('l-sys');
-    div.textContent = line;
-    el.appendChild(div);
-  }
-  if (scroll) el.scrollTop = el.scrollHeight;
-}
-
-function clearTerm() { document.getElementById('termBody').innerHTML = '<div class="log-line l-dim">Terminal cleared.</div>'; }
-function copyLogs() {
-  navigator.clipboard.writeText(document.getElementById('termBody').innerText)
-    .then(() => showToast('Logs copied to clipboard'));
-}
-
-function renderTable(rows) {
-  const tb = document.getElementById('metricsBody');
-  if (!rows || !rows.length) {
-    tb.innerHTML = '<tr><td colspan="10" class="empty-msg">No evaluation data yet.</td></tr>';
-    return;
-  }
-  tb.innerHTML = '';
-  let psnrS=0, psnrN=0, chamS=0, chamN=0;
-  for (const r of rows) {
-    const pv = parseFloat(r.psnr_avg); if (!isNaN(pv)) { psnrS+=pv; psnrN++; }
-    const cv = parseFloat(r.chamfer_distance_mm); if (!isNaN(cv)) { chamS+=cv; chamN++; }
-    const methodCls = r.method === 'SuGaR' ? 'chip-done' : 'chip-partial';
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="color:var(--text-4);font-size:12px">${r.timestamp||'-'}</td>
-      <td><strong>${r.class||'-'}</strong></td>
-      <td>${r.model||'-'}</td>
-      <td><span class="chip ${methodCls}">${r.method||'-'}</span></td>
-      <td style="font-weight:600;color:var(--blue)">${fmtN(r.psnr_avg)}</td>
-      <td>${fmtN(r.ssim_avg)}</td>
-      <td>${fmtN(r.lpips_avg)}</td>
-      <td style="font-weight:600;color:var(--purple)">${fmtN(r.chamfer_distance_mm)}</td>
-      <td style="font-size:12px">${r.peak_vram_mb ? Math.round(r.peak_vram_mb)+' MB' : '-'}</td>
-      <td style="font-size:12px">${r.duration_seconds ? (r.duration_seconds/60).toFixed(1)+' min' : '-'}</td>
-    `;
-    tb.appendChild(tr);
-  }
-  if (psnrN) document.getElementById('kpiPsnr').textContent = (psnrS/psnrN).toFixed(2) + ' dB';
-  if (chamN) document.getElementById('kpiChamfer').textContent = (chamS/chamN).toFixed(2) + ' mm';
-}
-
-function fmtN(v) { const n = parseFloat(v); return isNaN(n) ? '-' : n.toFixed(4); }
-function fmtSec(s) {
-  if (!s) return '00:00:00';
-  const t = Math.floor(s);
-  return [Math.floor(t/3600), Math.floor(t%3600/60), t%60].map(v=>String(v).padStart(2,'0')).join(':');
-}
-function exportCSV() { window.open('/api/metrics','_blank'); }
-
-function showToast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2200);
-}
-
-// Preview gallery
-const CLASSES = ['Dewa','Dewi','Mitologi','Penabuh','Pengapit','Punakawan','Raksasa','Wanara'];
-const MODELS = ['model_01','model_02'];
-const previewCache = {};
-
-function loadVisiblePreviews() {
-  for (const cls of CLASSES) {
-    if (activeFilter !== 'ALL' && activeFilter !== cls) continue;
-    for (const mdl of MODELS) {
-      loadPreview(cls, mdl);
-    }
-  }
-}
-
-async function loadPreview(cls, mdl) {
-  const el = document.getElementById(`preview-box-${cls}-${mdl}`);
-  if (!el) return;
-
-  const key = `${cls}/${mdl}`;
-  if (previewCache[key]) {
-    renderPreviewContent(el, previewCache[key]);
-    return;
-  }
-
-  try {
-    const r = await fetch(`/api/previews/${cls}/${mdl}`);
-    if (!r.ok) return;
-    const data = await r.json();
-    previewCache[key] = data;
-    renderPreviewContent(el, data);
-  } catch(e) {
-    console.error(`Preview fetch error for ${key}:`, e);
-  }
-}
-
-function renderPreviewContent(el, data) {
-  if (!data || !data.images || data.images.length === 0) {
-    el.innerHTML = '';
-    return;
-  }
-
-  let itemsHtml = '';
-  for (const img of data.images) {
-    itemsHtml += `
-      <div class="preview-item" onclick="openLightbox('${img.src}', '${img.label}')" title="${img.label} — Click to enlarge">
-        <img class="preview-thumb" src="${img.src}" alt="${img.label}" loading="lazy">
-        <span class="preview-item-caption">${img.label}</span>
-      </div>
-    `;
-  }
-
-  el.innerHTML = `
-    <div class="preview-header">
-      <span class="preview-title">Visual Preview</span>
-      <span class="preview-badge live">Trained Output</span>
-    </div>
-    <div class="preview-grid">${itemsHtml}</div>
-  `;
-}
-
-function openLightbox(src, caption) {
-  const lb = document.getElementById('lightbox');
-  document.getElementById('lightboxImg').src = src;
-  document.getElementById('lightboxCaption').textContent = caption || '';
-  lb.classList.add('open');
-}
-
-function closeLightbox() {
-  document.getElementById('lightbox').classList.remove('open');
-}
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeLightbox();
-});
-</script>
+<script src="/dashboard.js"></script>
 </body>
 </html>

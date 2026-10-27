@@ -140,6 +140,10 @@ Below is another example of a scene showing a robot with a black and specular ma
 
 ## Installation
 
+> **Workspace skripsi di WSL Ubuntu 22.04:** gunakan [panduan setup workspace](SETUP_WINDOWS11.md) untuk environment PyTorch/CUDA dan pipeline dataset skripsi. Panduan tersebut menargetkan WSL 2, bukan instalasi Python native Windows.
+
+> **Eksperimen 18 model:** [panduan server dan antrean dashboard](RUN_SERVER.md) menjelaskan 16 togog Bali + 2 sampel Tanks and Temples, lokasi input/output, antrean satu worker, dan evaluasi visual. Jalankan `bash setup_workspace.sh` lalu `bash start_dashboard.sh 8080` dari environment `sugar` di server.
+
 <details>
 <summary><span style="font-weight: bold;">Click here to see content.</span></summary>
 
@@ -178,7 +182,7 @@ python install.py
 conda activate sugar
 ```
 
-This script will automatically create a Conda environment named `sugar` and install all the required packages. It will also automatically install the <a href="https://github.com/graphdeco-inria/gaussian-splatting">3D Gaussian Splatting</a> rasterizer as well as the <a href="https://nvlabs.github.io/nvdiffrast/">Nvdiffrast</a> library for faster mesh rasterization.
+This workspace installer creates or reuses the `sugar` environment, installs CUDA Toolkit 11.8 and the Gaussian Splatting extensions, and stops if a command fails. Nvdiffrast is optional and skipped by default; `python install.py --with_nvdiffrast` installs the pinned v0.3.3 version. See [RUN_SERVER.md](RUN_SERVER.md) for the research pipeline.
 
 If you encounter any issues with the installation, you can try to follow the detailed instructions below to install the required packages manually.
 

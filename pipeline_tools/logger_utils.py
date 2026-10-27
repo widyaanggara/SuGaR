@@ -4,15 +4,15 @@ import time
 import json
 import csv
 import logging
+import shutil
+import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
+# The queue/3DGS supervisor must never create its own CUDA context.
+# Inspect torch only if the current process has already imported it.
 
 
 class ThesisLogger:
@@ -35,7 +35,8 @@ class ThesisLogger:
         self.statue_class = statue_class
         self.model_id = model_id
         self.method = method  # "3DGS" atau "SuGaR"
-        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._started_at = time.monotonic()
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         self.session_name = f"{statue_class}_{model_id}_{method}_{self.timestamp}"
 
         # Setup direktori
@@ -67,6 +68,7 @@ class ThesisLogger:
             "method": self.method,
             "timings_seconds": {},
             "peak_vram_gb": 0.0,
+            "vram_measurement": "unavailable",
             "metrics": {
                 "psnr": None,
                 "ssim": None,
@@ -79,6 +81,9 @@ class ThesisLogger:
         }
 
         self._timers: Dict[str, float] = {}
+        self._vram_monitor_stop = None
+        self._vram_monitor_thread = None
+        self._vram_monitor_pid = None
 
     def _init_logger(self):
         self.logger = logging.getLogger(self.session_name)
@@ -127,12 +132,78 @@ class ThesisLogger:
 
     def record_vram(self):
         """Mencatat penggunaan memori VRAM GPU tertinggi."""
-        if TORCH_AVAILABLE and torch.cuda.is_available():
+        torch = sys.modules.get("torch")
+        if torch is not None and torch.cuda.is_initialized():
             peak_bytes = torch.cuda.max_memory_allocated()
             peak_gb = round(peak_bytes / (1024 ** 3), 3)
-            if peak_gb > self.data["peak_vram_gb"]:
-                self.data["peak_vram_gb"] = peak_gb
-                self.log(f"Puncak Penggunaan VRAM GPU: {peak_gb:.2f} GB")
+            self.data['peak_vram_gb'] = peak_gb
+            self.data["vram_measurement"] = "torch_peak_allocated"
+
+    def record_process_vram_gb(self, used_gb: float):
+        """Update VRAM peak from either PyTorch or nvidia-smi process sampling."""
+        used_gb = max(0.0, float(used_gb))
+        if used_gb > self.data["peak_vram_gb"]:
+            self.data["peak_vram_gb"] = round(used_gb, 3)
+            self.log(f"Puncak Penggunaan VRAM GPU: {used_gb:.2f} GB")
+
+    def start_vram_monitor(self, pid: Optional[int] = None, interval_seconds: float = 1.0):
+        """Sample this process (or a child training process) with nvidia-smi."""
+        self.stop_vram_monitor()
+        if shutil.which("nvidia-smi") is None:
+            self.log("nvidia-smi tidak ditemukan; pencatatan VRAM proses tidak aktif.", level="warning")
+            return False
+
+        self._vram_monitor_pid = int(pid if pid is not None else os.getpid())
+        stop_event = threading.Event()
+        self._vram_monitor_stop = stop_event
+
+        def sample_process_memory():
+            command = [
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_memory",
+                "--format=csv,noheader,nounits",
+            ]
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=False)
+                if result.returncode != 0:
+                    return
+                used_mb = 0.0
+                found_pid = False
+                for row in result.stdout.splitlines():
+                    columns = [column.strip() for column in row.split(",", 1)]
+                    if len(columns) != 2 or columns[0] != str(self._vram_monitor_pid):
+                        continue
+                    try:
+                        used_mb += float(columns[1].split()[0])
+                        found_pid = True
+                    except (ValueError, IndexError):
+                        continue
+                if found_pid:
+                    self.record_process_vram_gb(used_mb / 1024.0)
+                    self.data["vram_measurement"] = "nvidia_smi_process_sample"
+            except (OSError, subprocess.SubprocessError):
+                return
+
+        def monitor():
+            while not stop_event.is_set():
+                sample_process_memory()
+                stop_event.wait(max(0.2, interval_seconds))
+
+        self._vram_monitor_thread = threading.Thread(target=monitor, name="vram-monitor", daemon=True)
+        self._vram_monitor_thread.start()
+        return True
+
+    def stop_vram_monitor(self):
+        stop_event = self._vram_monitor_stop
+        monitor_thread = self._vram_monitor_thread
+        if stop_event is None:
+            return
+        stop_event.set()
+        if monitor_thread is not None and monitor_thread is not threading.current_thread():
+            monitor_thread.join(timeout=6)
+        self._vram_monitor_stop = None
+        self._vram_monitor_thread = None
+        self._vram_monitor_pid = None
 
     def set_metrics(self, 
                     psnr: Optional[float] = None, 
@@ -161,10 +232,11 @@ class ThesisLogger:
     def finalize(self, success: bool = True):
         """Menyelesaikan sesi log dan mengekspor rekapitulasi ke JSON, CSV, dan Markdown."""
         self.data["status"] = "COMPLETED" if success else "FAILED"
+        self.stop_vram_monitor()
         self.record_vram()
 
         # Hitung total waktu
-        total_seconds = sum(self.data["timings_seconds"].values())
+        total_seconds = time.monotonic() - self._started_at
         self.data["total_duration_seconds"] = round(total_seconds, 2)
         self.data["total_duration_minutes"] = round(total_seconds / 60.0, 2)
 
@@ -201,7 +273,7 @@ class ThesisLogger:
             self.model_id,
             self.method,
             self.data.get("total_duration_minutes", 0),
-            self.data["peak_vram_gb"],
+            self.data["peak_vram_gb"] if self.data["vram_measurement"] != "unavailable" else "-",
             self.data["metrics"]["psnr"] if self.data["metrics"]["psnr"] is not None else "-",
             self.data["metrics"]["ssim"] if self.data["metrics"]["ssim"] is not None else "-",
             self.data["metrics"]["lpips"] if self.data["metrics"]["lpips"] is not None else "-",

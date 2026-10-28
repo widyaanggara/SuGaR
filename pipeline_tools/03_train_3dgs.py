@@ -12,6 +12,7 @@ sys.path.append(str(PROJECT_ROOT))
 from pipeline_tools.logger_utils import ThesisLogger
 from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.dataset_registry import has_colmap_model
+from pipeline_tools.run_settings import add_resolution_arguments, resolution_settings, colmap_signature
 
 
 def train_vanilla_3dgs(scene_path: str,
@@ -22,7 +23,9 @@ def train_vanilla_3dgs(scene_path: str,
                        white_background: bool = False,
                        eval_split: bool = True,
                        gpu: int = 0,
-                       logger: ThesisLogger = None):
+                       logger: ThesisLogger = None,
+                       image_downscale: int = 1,
+                       image_max_size: int = 1600):
     """
     Melatih model vanilla 3D Gaussian Splatting baseline.
     Menyimpan checkpoint pada 7.000 iterasi (untuk SuGaR) dan 30.000 iterasi (baseline final).
@@ -32,6 +35,7 @@ def train_vanilla_3dgs(scene_path: str,
         raise FileNotFoundError("COLMAP belum lengkap: perlu images/ dan sparse/0/{cameras,images,points3D}.")
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / 'training_settings.json').unlink(missing_ok=True)
 
     train_script = PROJECT_ROOT / "gaussian_splatting" / "train.py"
     if not train_script.exists():
@@ -42,6 +46,8 @@ def train_vanilla_3dgs(scene_path: str,
         str(train_script),
         "--disable_viewer",
         "--data_device", "cpu",
+        "--image_downscale", str(image_downscale),
+        "--image_max_size", str(image_max_size),
         "-s", str(scene_path),
         "-m", str(output_dir),
         "--iterations", str(iterations),
@@ -94,6 +100,11 @@ def train_vanilla_3dgs(scene_path: str,
     if proc.returncode != 0:
         raise RuntimeError(f"Pelatihan 3DGS gagal dengan kode error: {proc.returncode}")
 
+    receipt = {'image_downscale': image_downscale, 'image_max_size': image_max_size,
+               'colmap_signature': colmap_signature(scene_path), 'white_background': white_background,
+               'eval_split': eval_split, 'iterations': iterations, 'data_device': 'cpu'}
+    (output_dir / 'training_settings.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
+
     statistics = output_dir / 'run_statistics.json'
     if logger and statistics.is_file():
         stats = json.loads(statistics.read_text(encoding='utf-8'))
@@ -116,8 +127,10 @@ def main():
     parser.add_argument("--iterations", type=int, default=30000, help="Total iterasi pelatihan (default: 30000).")
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU (default: 0).")
+    add_resolution_arguments(parser)
 
     args = parser.parse_args()
+    resolution_settings(vars(args))
     if args.gpu < 0 or args.iterations < 7000:
         parser.error("GPU harus >= 0 dan iterasi >= 7000 untuk checkpoint SuGaR.")
 
@@ -130,7 +143,8 @@ def main():
     logger.set_parameters({
         "iterations": args.iterations,
         "gpu": args.gpu,
-        "white_background": args.white_background
+        "white_background": args.white_background,
+        'image_downscale': args.image_downscale, 'image_max_size': args.image_max_size
     })
 
     try:
@@ -143,7 +157,9 @@ def main():
                 checkpoint_iterations=sorted({7000, args.iterations}),
                 white_background=args.white_background,
                 gpu=args.gpu,
-                logger=logger
+                logger=logger,
+                image_downscale=args.image_downscale,
+                image_max_size=args.image_max_size
             )
         logger.finalize(success=True)
     except Exception as e:

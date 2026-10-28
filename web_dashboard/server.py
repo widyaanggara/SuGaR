@@ -17,6 +17,9 @@ from pipeline_tools.dataset_registry import (CATALOG, VIDEO_EXTENSIONS, has_chec
 from pipeline_tools.init_dataset_folders import initialize_workspace
 from pipeline_tools.gpu_lock import gpu_lock
 from web_dashboard.job_queue import JobQueue
+from pipeline_tools.run_settings import (resolution_settings, colmap_settings, colmap_arguments,
+    sugar_settings, sugar_arguments, research_presets)
+from pipeline_tools.colmap_capabilities import inspect_colmap
 
 
 def get_project_status(root=PROJECT_ROOT):
@@ -73,11 +76,13 @@ def build_command(job, root=PROJECT_ROOT):
     scene = root / "datasets" / cls / mdl
     common = ["--statue_class", cls, "--model_id", mdl]
     gpu = ["--gpu", str(job.get("gpu", 0))]
+    settings = resolution_settings(job)
+    image_args = ['--image_downscale', str(settings['image_downscale']),
+                  '--image_max_size', str(settings['image_max_size'])]
     if action == "full_pipeline":
         script = "batch_run_all.py"
         args = ["--class_name", cls, "--model_id", mdl, *gpu,
-                "--refinement_time", job.get("refinement_time", "short"),
-                "--vertices", str(job.get("vertices", 250000))]
+                *sugar_arguments(job)]
         if not job.get("resume", True):
             args.append("--no_resume")
     elif action == "extract_frames":
@@ -94,7 +99,7 @@ def build_command(job, root=PROJECT_ROOT):
     elif action == "sugar":
         script, args = "04_train_sugar.py", ["-s", str(scene), "-c",
             str(root / "outputs/3dgs" / cls / mdl), *common, *gpu,
-            "--refinement_time", job.get("refinement_time", "short"), "--vertices", str(job.get("vertices", 250000))]
+            *sugar_arguments(job)]
     elif action == "evaluate_visual":
         script, args = "06_evaluate_rendering.py", [*common, *gpu, "--method", job["evaluation_method"]]
     elif action == "evaluate":
@@ -109,6 +114,11 @@ def build_command(job, root=PROJECT_ROOT):
             "-g", str(scene / "ground_truth/lidar.ply"), "--scale_factor", str(job["scale_factor"])]
     else:
         raise ValueError("Tahap pipeline tidak dikenal.")
+    if action in {'full_pipeline', 'colmap'}:
+        args.extend(['--colmap_max_image_size', str(settings['colmap_max_image_size'])])
+        args.extend(colmap_arguments(job))
+    if action in {'full_pipeline', '3dgs', 'sugar', 'evaluate_visual'}:
+        args.extend(image_args)
     return [sys.executable, "-u", str(root / "pipeline_tools" / script), *args]
 
 
@@ -124,13 +134,22 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     if action != "full_pipeline" and (not cls or not mdl):
         raise ValueError("Pilih satu kelas dan satu model untuk tahap ini.")
     pairs = scene_pairs(cls, mdl)
+    settings = {**resolution_settings(data), **colmap_settings(data), **sugar_settings(data)}
+    references = research_presets()
+    selected_sugar = sugar_settings(data)
+    source_preset = next((key for key, preset in references['presets'].items()
+                          if preset['values'] == selected_sugar), 'custom')
     try:
-        gpu, vertices = int(data.get("gpu", 0)), int(data.get("vertices", 250000))
+        raw_gpu = data.get('gpu', 0)
+        if isinstance(raw_gpu, bool) or not isinstance(raw_gpu, (str, int)):
+            raise ValueError('GPU harus berupa bilangan bulat.')
+        gpu = int(raw_gpu)
+        vertices = settings['vertices']
     except (TypeError, ValueError):
         raise ValueError("GPU dan target mesh harus berupa bilangan bulat.")
     if gpu < 0 or vertices < 1000 or vertices > 2000000:
         raise ValueError("GPU harus >= 0; target mesh antara 1000 dan 2000000.")
-    refinement = data.get("refinement_time", "short")
+    refinement = settings['refinement_time']
     if refinement not in {"short", "medium", "long"}:
         raise ValueError("Refinement harus short, medium, atau long.")
     method = data.get("evaluation_method", "SuGaR")
@@ -149,9 +168,11 @@ def prepare_jobs(data, root=PROJECT_ROOT):
         if action == "full_pipeline" and not has_data(Path(root) / "datasets" / cls / mdl):
             skipped.append(f"{cls}/{mdl}")
             continue
-        jobs.append(dict(action=action, class_name=cls, model_id=mdl, gpu=gpu, vertices=vertices,
-                         refinement_time=refinement, resume=data.get("resume", True) is True,
-                         evaluation_method=method, scale_factor=scale))
+        jobs.append(dict(action=action, class_name=cls, model_id=mdl, gpu=gpu,
+                         resume=data.get("resume", True) is True,
+                         evaluation_method=method, scale_factor=scale,
+                         sugar_configuration_source=source_preset,
+                         upstream_reference=references['source'], **settings))
     return jobs, skipped
 
 
@@ -175,6 +196,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json({"classes": CATALOG, "total_models": len(scene_pairs())})
             elif path == "/api/status":
                 self.send_json(get_project_status(self.root))
+            elif path == '/api/colmap':
+                self.send_json(inspect_colmap())
+            elif path == '/api/presets':
+                self.send_json(research_presets())
             elif path == "/api/metrics":
                 self.send_json(get_metrics_table(self.root))
             elif path == "/api/metrics.csv":

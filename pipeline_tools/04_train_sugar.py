@@ -12,6 +12,8 @@ sys.path.append(str(PROJECT_ROOT))
 from pipeline_tools.logger_utils import ThesisLogger
 from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.dataset_registry import has_checkpoint, has_colmap_model, file_signature
+from pipeline_tools.run_settings import (add_resolution_arguments, resolution_settings, training_matches,
+    sugar_settings, research_presets)
 
 
 def train_sugar_pipeline(scene_path: str,
@@ -24,7 +26,9 @@ def train_sugar_pipeline(scene_path: str,
                          export_obj: bool = True,
                          gpu: int = 0,
                          white_background: bool = False,
-                         logger: ThesisLogger = None):
+                         logger: ThesisLogger = None,
+                         image_downscale: int = 1,
+                         image_max_size: int = 1600):
     """
     Menjalankan pipeline SuGaR lengkap secara teratur dan aman dari masalah memori/path.
     
@@ -36,7 +40,13 @@ def train_sugar_pipeline(scene_path: str,
     """
     if not has_colmap_model(scene_path) or not has_checkpoint(checkpoint_3dgs, 7000):
         raise FileNotFoundError("Dataset COLMAP dan checkpoint 3DGS iterasi 7000 harus lengkap.")
+    sugar_settings(dict(vertices=n_vertices, refinement_time=refinement_time,
+        gaussians_per_triangle=gaussians_per_triangle, regularization=regularization_type))
+    if not training_matches(checkpoint_3dgs, scene_path, image_downscale, image_max_size, white_background):
+        raise ValueError('Resolusi, split, background, atau model COLMAP berbeda dari baseline 3DGS. Jalankan Pipeline Lengkap untuk konfigurasi ini.')
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
+    os.environ['SUGAR_IMAGE_DOWNSCALE'] = str(image_downscale)
+    os.environ['SUGAR_IMAGE_MAX_SIZE'] = str(image_max_size)
     os.environ.setdefault('SUGAR_IMAGE_DEVICE', 'cpu')
     gpu = 0  # Physical GPU is now exposed as logical cuda:0.
     import torch
@@ -85,7 +95,13 @@ def train_sugar_pipeline(scene_path: str,
 
     if logger:
         logger.log(f"Memulai Pipeline SuGaR untuk Scene: {scene_path}")
-        logger.log(f"Regularisasi: {regularization_type}, Refinement Iterations: {refinement_iterations}, Target Vertex: {n_vertices}")
+        logger.log(f"Regularisasi: {regularization_type}, Refinement: {refinement_iterations}, "
+                   f"Parameter decimation: {n_vertices}, Gaussian/segitiga: {gaussians_per_triangle}")
+        logger.set_parameters({'effective_sugar_settings': {
+            'regularization': regularization_type, 'refinement_iterations': refinement_iterations,
+            'decimation_target': n_vertices, 'gaussians_per_triangle': gaussians_per_triangle,
+            'image_downscale': image_downscale, 'image_max_size': image_max_size},
+            'upstream_reference': research_presets()['source']})
 
     # ==================== 1. Coarse SuGaR ====================
     if logger:
@@ -212,8 +228,10 @@ def train_sugar_pipeline(scene_path: str,
     manifest = {key: Path(path).resolve().relative_to(output_dir).as_posix() if path else None
                 for key, path in artifacts.items()}
     manifest.update(regularization=regularization_type, refinement_iterations=refinement_iterations,
-                    target_triangles=n_vertices, gaussians_per_triangle=gaussians_per_triangle,
+                    decimation_target=n_vertices, gaussians_per_triangle=gaussians_per_triangle,
                     white_background=white_background, scene_path=scene_path)
+    manifest.update(image_downscale=image_downscale, image_max_size=image_max_size)
+    manifest['upstream_reference'] = research_presets()['source']
     manifest['baseline_signature'] = file_signature(Path(checkpoint_3dgs) / 'point_cloud/iteration_7000/point_cloud.ply')
     temporary = manifest_path.with_suffix('.tmp')
     temporary.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -232,11 +250,15 @@ def main():
     parser.add_argument("--model_id", type=str, default="model_01", help="ID model patung.")
     parser.add_argument("--regularization", "-r", type=str, default="dn_consistency", choices=["dn_consistency", "density", "sdf"], help="Tipe regularisasi (default: dn_consistency).")
     parser.add_argument("--refinement_time", type=str, default="short", choices=["short", "medium", "long"], help="Waktu refinement (default: short / 2000 iterasi agar cepat dan aman VRAM).")
-    parser.add_argument("--vertices", type=int, default=250000, help="Target segitiga saat decimation mesh (default: 250000; nama argumen dipertahankan).")
+    parser.add_argument("--vertices", type=int, default=250000, help="Parameter n_vertices_in_mesh upstream, diteruskan sebagai decimation_target ke extractor.")
+    parser.add_argument('--gaussians_per_triangle', type=int, choices=(1, 3, 4, 6), default=1)
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU device (default: 0).")
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
+    add_resolution_arguments(parser)
 
     args = parser.parse_args()
+    resolution_settings(vars(args))
+    sugar_settings(vars(args))
     if args.gpu < 0 or args.vertices < 1000:
         parser.error("GPU harus >= 0 dan target mesh >= 1000.")
 
@@ -249,9 +271,11 @@ def main():
     logger.set_parameters({
         "regularization": args.regularization,
         "refinement_time": args.refinement_time,
-        "target_vertices": args.vertices,
+        "decimation_target": args.vertices,
+        'gaussians_per_triangle': args.gaussians_per_triangle,
         "gpu": args.gpu,
-        "phase": "training"
+        "phase": "training",
+        'image_downscale': args.image_downscale, 'image_max_size': args.image_max_size
     })
     logger.start_vram_monitor(os.getpid())
 
@@ -264,9 +288,12 @@ def main():
                 regularization_type=args.regularization,
                 refinement_time=args.refinement_time,
                 n_vertices=args.vertices,
+                gaussians_per_triangle=args.gaussians_per_triangle,
                 gpu=args.gpu,
                 white_background=args.white_background,
-                logger=logger
+                logger=logger,
+                image_downscale=args.image_downscale,
+                image_max_size=args.image_max_size
             )
         logger.stop_vram_monitor()
         logger.finalize(success=True)

@@ -1,0 +1,27 @@
+{
+  "default": "official_high",
+  "source": {
+    "repository": "https://github.com/Anttwo/SuGaR",
+    "readme": "https://github.com/Anttwo/SuGaR#quick-start",
+    "training_code": "https://github.com/Anttwo/SuGaR/blob/main/train.py",
+    "verified_on": "2026-10-28",
+    "scope": "Konfigurasi SuGaR saja. Resolusi foto dan COLMAP adalah parameter protokol penelitian ini, bukan preset resmi RTX 4090."
+  },
+  "presets": {
+    "official_high": {
+      "label": "SuGaR high_poly · long",
+      "description": "Konfigurasi high_poly dan refinement long dari repo resmi: parameter mesh 1.000.000, 1 Gaussian/segitiga, 15.000 iterasi. Tidak menjamin muat di VRAM tiap scene.",
+      "values": {"vertices": 1000000, "gaussians_per_triangle": 1, "refinement_time": "long", "regularization": "dn_consistency"}
+    },
+    "official_low": {
+      "label": "SuGaR low_poly · long",
+      "description": "Opsi low_poly resmi: parameter mesh 200.000 dan 6 Gaussian/segitiga; refinement long 15.000 iterasi. Low-poly tidak otomatis berarti lebih hemat VRAM.",
+      "values": {"vertices": 200000, "gaussians_per_triangle": 6, "refinement_time": "long", "regularization": "dn_consistency"}
+    },
+    "official_short": {
+      "label": "Uji awal · low_poly + short",
+      "description": "Gabungan dua opsi yang disediakan upstream: low_poly (200.000, 6 Gaussian/segitiga) dan short (2.000 iterasi). Untuk uji alur; jangan dianggap hasil benchmark atau replikasi tabel paper.",
+      "values": {"vertices": 200000, "gaussians_per_triangle": 6, "refinement_time": "short", "regularization": "dn_consistency"}
+    }
+  }
+}

@@ -1,6 +1,5 @@
 """Evaluate actual checkpoints on the same held-out camera split."""
 import argparse
-import ast
 import json
 import os
 import sys
@@ -11,22 +10,22 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipeline_tools.dataset_registry import has_checkpoint, has_sugar_result, scene_pairs, file_signature
 from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.logger_utils import ThesisLogger
+from pipeline_tools.run_settings import add_resolution_arguments, resolution_settings, read_training_config, training_matches
 
 
 def training_background(output):
     """Read one literal setting from 3DGS cfg_args without executing its contents."""
-    tree = ast.parse((Path(output) / 'cfg_args').read_text(encoding='utf-8'), mode='eval')
-    if not isinstance(tree.body, ast.Call) or not isinstance(tree.body.func, ast.Name) or tree.body.func.id != 'Namespace':
-        raise ValueError('Format cfg_args 3DGS tidak valid.')
-    options = {kw.arg: kw.value for kw in tree.body.keywords}
-    if 'eval' not in options or ast.literal_eval(options['eval']) is not True:
+    options = read_training_config(output)
+    if options.get('eval') is not True:
         raise ValueError('Checkpoint harus dilatih dengan --eval agar citra uji tidak masuk pelatihan.')
-    return bool(ast.literal_eval(options.get('white_background', ast.Constant(False))))
+    return bool(options.get('white_background', False))
 
 
-def evaluate_rendering(cls, mdl, method, gpu, logger):
+def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_max_size=1600):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
     os.environ.setdefault('SUGAR_IMAGE_DEVICE', 'cpu')
+    os.environ['SUGAR_IMAGE_DOWNSCALE'] = str(image_downscale)
+    os.environ['SUGAR_IMAGE_MAX_SIZE'] = str(image_max_size)
     import numpy as np
     import torch
     from PIL import Image
@@ -46,6 +45,8 @@ def evaluate_rendering(cls, mdl, method, gpu, logger):
     if not has_checkpoint(baseline, iteration):
         raise FileNotFoundError(f'Checkpoint 3DGS {iteration} belum lengkap.')
     white = training_background(baseline)
+    if not training_matches(baseline, scene, image_downscale, image_max_size, white):
+        raise ValueError('Konfigurasi evaluasi berbeda dari training baseline: resolusi, split, atau model COLMAP berubah.')
     manifest = None
     if method == 'SuGaR':
         if not has_sugar_result(output):
@@ -53,6 +54,8 @@ def evaluate_rendering(cls, mdl, method, gpu, logger):
         manifest = json.loads((output / 'pipeline_result.json').read_text(encoding='utf-8'))
         if manifest['white_background'] != white:
             raise ValueError('Background SuGaR dan baseline berbeda; latih dengan konfigurasi yang sama.')
+        if manifest.get('image_downscale') != image_downscale or manifest.get('image_max_size') != image_max_size:
+            raise ValueError('Resolusi evaluasi berbeda dari training SuGaR; gunakan konfigurasi training yang sama.')
     wrapper = GaussianSplattingWrapper(source_path=str(scene), output_path=str(baseline),
         iteration_to_load=iteration, load_gt_images=True, eval_split=True, eval_split_interval=8,
         white_background=white)
@@ -106,6 +109,7 @@ def evaluate_rendering(cls, mdl, method, gpu, logger):
     report = dict(metrics, method=method, representation='gaussian_splatting' if refined is None else 'sugar_hybrid',
                   eval_split_interval=8, white_background=white, per_view=values,
                   lpips_network='vgg', lpips_input_range=[-1, 1],
+                  image_downscale=image_downscale, image_max_size=image_max_size,
                   baseline_iteration=iteration, checkpoint=manifest['refined_checkpoint'] if manifest else
                   'point_cloud/iteration_30000/point_cloud.ply')
     checkpoint_path = output / manifest['refined_checkpoint'] if manifest else baseline / report['checkpoint']
@@ -116,6 +120,7 @@ def evaluate_rendering(cls, mdl, method, gpu, logger):
     logger.set_parameters({'phase': 'visual_evaluation', 'eval_split_interval': 8,
                            'test_images': [row['image'] for row in values], 'output': str(folder),
                            'representation': report['representation']})
+    logger.set_parameters({'image_downscale': image_downscale, 'image_max_size': image_max_size})
     logger.set_metrics(**metrics)
     logger.record_vram()
 
@@ -126,7 +131,9 @@ def main():
     parser.add_argument('--model_id', required=True)
     parser.add_argument('--method', choices=['3DGS', 'SuGaR'], required=True)
     parser.add_argument('--gpu', type=int, default=0)
+    add_resolution_arguments(parser)
     args = parser.parse_args()
+    resolution_settings(vars(args))
     if args.gpu < 0:
         parser.error('GPU harus >= 0.')
     scene_pairs(args.statue_class, args.model_id)
@@ -134,7 +141,8 @@ def main():
     try:
         with gpu_lock(args.gpu):
             logger.start_stage('Evaluasi_Visual')
-            evaluate_rendering(args.statue_class, args.model_id, args.method, args.gpu, logger)
+            evaluate_rendering(args.statue_class, args.model_id, args.method, args.gpu, logger,
+                               args.image_downscale, args.image_max_size)
             logger.end_stage('Evaluasi_Visual')
         logger.finalize(True)
         return 0

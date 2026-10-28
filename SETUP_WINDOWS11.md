@@ -4,6 +4,22 @@
 
 Panduan ini untuk server Windows dengan Ubuntu 22.04 yang berjalan di WSL 2. Gunakan spesifikasi GPU server yang benar-benar ditampilkan oleh `nvidia-smi`; GPU laptop lokal tidak menjadi acuan. Untuk struktur lengkap 18 dataset, antrean dashboard, dan akses dari komputer lain, lihat [panduan operasional server](RUN_SERVER.md).
 
+Kondisi awal: hanya akun WSL `anggara` yang sudah tersedia. Kode proyek dipindahkan melalui repository GitHub `https://github.com/widyaanggara/SuGaR.git`. Instalasi pertama di server menggunakan `git clone`; pembaruan berikutnya menggunakan `git pull --ff-only`.
+
+## 0. Kirim perubahan dari laptop ke GitHub
+
+Dari terminal IDE pada folder proyek di laptop, jalankan:
+
+```powershell
+git status
+git add .
+git diff --cached --stat
+git commit -m "Siapkan pipeline 18 model dan antrean dashboard WSL"
+git push origin main
+```
+
+Periksa daftar file yang akan di-commit sebelum menjalankan commit. Jika `git status` menunjukkan working tree bersih dan semua perubahan sudah di-commit, cukup jalankan `git push origin main`. Jika Git melaporkan `Everything up-to-date`, tidak ada commit lokal baru untuk dikirim. Dataset foto/video dipindahkan terpisah sesuai kebutuhan penelitian; folder output dibuat ulang oleh skrip inisialisasi di server.
+
 ## 1. Masuk ke akun kerja Ubuntu
 
 Buka aplikasi Ubuntu. Berpindah ke akun kerja yang sudah disiapkan:
@@ -49,27 +65,34 @@ sudo apt update
 sudo apt install -y build-essential cmake git wget curl ffmpeg colmap libgl1 libglib2.0-0
 ```
 
-### Masuk ke folder proyek
+### Ambil proyek dari GitHub untuk pertama kali
 
-Setelah `cd ~`, lihat folder kerja yang tersedia:
-
-```bash
-ls -la
-```
-
-Masuk ke folder SuGaR yang disediakan di home, misalnya:
+Pada akun WSL yang baru, folder `~/SuGaR` memang belum ada. Buat salinan repository dengan perintah berikut:
 
 ```bash
+cd ~
+git clone https://github.com/widyaanggara/SuGaR.git SuGaR
 cd ~/SuGaR
 ```
 
-Pastikan folder tersebut berisi `README.md`, `environment.yml`, dan `pipeline_tools/`:
+Pastikan branch aktif adalah `main` dan file pipeline versi penelitian tersedia:
 
 ```bash
-ls
+git branch --show-current
+ls environment.yml install.py RUN_SERVER.md
+ls pipeline_tools/check_environment.py web_dashboard/job_queue.py
 ```
 
-Jika nama atau lokasi folder yang disiapkan berbeda, gunakan path yang diberikan teman Anda. Jalankan perintah instalasi dari folder utama proyek ini.
+Jika repository privat, selesaikan autentikasi GitHub dengan metode akses yang disediakan untuk akun Anda. Password akun WSL digunakan untuk Linux dan bukan untuk autentikasi GitHub.
+
+Untuk pembaruan berikutnya, setelah pekerjaan training/dashboard dihentikan, gunakan:
+
+```bash
+cd ~/SuGaR
+git pull --ff-only origin main
+```
+
+`git pull` mengambil kode terbaru; perintah ini tidak memasang paket Python atau mengompilasi ulang extension. Jika dependensi atau kode extension CUDA berubah, jalankan kembali instalasi dan pemeriksaan environment. Foto dan hasil yang diabaikan Git tidak ikut dikirim melalui push/pull.
 
 ## 4. Pasang Conda dan environment proyek
 
@@ -81,12 +104,36 @@ wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O mi
 bash miniconda.sh
 ```
 
-Ikuti installer, izinkan `conda init`, lalu tutup dan buka lagi terminal Ubuntu. Masuk ke folder proyek dan buat environment dari file proyek:
+Ikuti installer dan gunakan lokasi `/home/anggara/miniconda3` untuk akun penelitian ini. Sesudah instalasi, muat Conda ke terminal aktif:
+
+```bash
+source ~/miniconda3/etc/profile.d/conda.sh
+```
+
+Periksa bahwa Conda tersedia:
 
 ```bash
 conda --version
 conda env list
 ```
+
+### Jalur instalasi yang disarankan untuk server baru
+
+Jalankan installer proyek dari environment `base`:
+
+```bash
+conda activate base
+cd ~/SuGaR
+python install.py
+conda activate sugar
+python pipeline_tools/check_environment.py --gpu 0
+```
+
+Installer memasang environment, CUDA Toolkit 11.8, extension CUDA, serta kebutuhan tambahan pipeline. Nvdiffrast dilewati secara default. Lanjutkan ke bagian **6. Siapkan folder data dan hasil** hanya jika pemeriksaan menunjukkan `"status": "PASSED"`. Jangan menjalankan langkah instalasi manual di bawah ini lagi jika jalur otomatis sudah berhasil.
+
+Jika akun tidak memiliki izin `sudo`, minta pengelola server memasang paket sistem pada bagian 3. Conda dan proyek tetap dipasang di home akun `anggara`.
+
+### Alternatif instalasi manual
 
 Jika environment `sugar` belum ada, buat dari file proyek:
 
@@ -154,6 +201,17 @@ datasets/Dewa/model_01/ground_truth/ # point cloud LiDAR opsional
 ## 7. Jalankan pipeline satu model
 
 Contoh berikut menjalankan seluruh tahap untuk `Dewa/model_01`.
+
+Untuk uji pertama yang juga mencakup evaluasi visual, jalankan:
+
+```bash
+python -u pipeline_tools/batch_run_all.py \
+  --class_name Dewa --model_id model_01 --gpu 0 --refinement_time short
+```
+
+Atau gunakan tombol **Antrekan Pipeline Lengkap** pada kartu `Dewa/model_01` di dashboard (bagian 8). Pilih salah satu pengendali saat pengujian. Pastikan satu model selesai sampai ekspor OBJ dan evaluasi sebelum mengantrekan seluruh 18 model.
+
+Perintah terpisah per tahap berikut tersedia untuk penelusuran masalah:
 
 ### Ekstrak frame video (opsional)
 

@@ -18,6 +18,7 @@ from pipeline_tools.init_dataset_folders import initialize_workspace
 from sugar_utils.artifact_paths import refined_assets
 from web_dashboard.job_queue import JobQueue
 from web_dashboard.server import DashboardHandler, build_command, get_project_status, prepare_jobs
+from pipeline_tools.run_settings import colmap_signature
 
 
 def write(path, text='data'):
@@ -210,18 +211,22 @@ class RunnerTests(unittest.TestCase):
                     write(baseline / 'cameras.json', '[]')
                     for iteration in (7000, 30000):
                         write(baseline / f'point_cloud/iteration_{iteration}/point_cloud.ply')
+                    write(baseline / 'training_settings.json', json.dumps(dict(image_downscale=1,
+                        image_max_size=1600, colmap_signature=colmap_signature(scene))))
                 elif script == '04_train_sugar.py':
                     for name in ('mesh/test.ply', 'refined/test/2000.pt', 'textured_mesh/test.obj'):
                         write(sugar / name)
                     manifest = dict(coarse_mesh='mesh/test.ply', refined_checkpoint='refined/test/2000.pt',
                         textured_mesh='textured_mesh/test.obj', target_triangles=250000,
-                        refinement_iterations=2000, regularization='dn_consistency')
+                        refinement_iterations=2000, regularization='dn_consistency', image_downscale=1, image_max_size=1600,
+                        gaussians_per_triangle=1)
                     write(sugar / 'pipeline_result.json', json.dumps(manifest))
                 elif script == '06_evaluate_rendering.py':
                     method = args[args.index('--method') + 1]
                     output = baseline if method == '3DGS' else sugar
                     checkpoint = 'point_cloud/iteration_30000/point_cloud.ply' if method == '3DGS' else 'refined/test/2000.pt'
                     write(output / 'evaluation/metrics.json', json.dumps(dict(psnr=20, ssim=.8, lpips=.2,
+                        image_downscale=1, image_max_size=1600,
                         checkpoint=checkpoint, checkpoint_signature=file_signature(output / checkpoint), per_view=[{}])))
             with patch.object(batch, 'run_stage', side_effect=fake_stage):
                 self.assertEqual(batch.process_single_statue(scene, 'Dewa', 'model_01', root=root), 'COMPLETED')
@@ -232,6 +237,12 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(calls, [])
                 # Changing refinement invalidates the completed SuGaR stage.
                 batch.process_single_statue(scene, 'Dewa', 'model_01', root=root, refinement_time='medium')
+                self.assertEqual(calls, ['04_train_sugar.py', '06_evaluate_rendering.py'])
+                calls.clear()
+                batch.process_single_statue(scene, 'Dewa', 'model_01', root=root, gaussians_per_triangle=6)
+                self.assertEqual(calls, ['04_train_sugar.py', '06_evaluate_rendering.py'])
+                calls.clear()
+                batch.process_single_statue(scene, 'Dewa', 'model_01', root=root, regularization='density')
                 self.assertEqual(calls, ['04_train_sugar.py', '06_evaluate_rendering.py'])
 
     def test_stage_failure_propagates_and_main_reports_failure(self):
@@ -245,6 +256,23 @@ class RunnerTests(unittest.TestCase):
         with patch.object(sys, 'argv', ['batch_run_all.py', '-c', 'Dewa']), \
              patch.object(batch, 'process_single_statue', side_effect=[RuntimeError('failed'), 'COMPLETED']):
             self.assertEqual(batch.main(), 1)
+
+    def test_full_pipeline_forwards_custom_colmap_settings_to_the_actual_stage(self):
+        from pipeline_tools import batch_run_all as batch
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write(root / 'input/a.jpg')
+            with patch.object(batch, 'run_stage', side_effect=subprocess.CalledProcessError(2, 'colmap')) as stage:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    batch.process_single_statue(root, 'Dewa', 'model_01', gpu=2,
+                        colmap_device='auto', colmap_matcher='sequential',
+                        colmap_max_image_size=2000, colmap_max_features=4096, colmap_sequential_overlap=15)
+                script, args, _ = stage.call_args.args
+                self.assertEqual(script, '02_run_colmap.py')
+                for flag, expected in (('--gpu', 2), ('--colmap_device', 'auto'),
+                    ('--colmap_matcher', 'sequential'), ('--colmap_max_features', '4096'),
+                    ('--colmap_sequential_overlap', '15'), ('--colmap_max_image_size', 2000)):
+                    self.assertEqual(args[args.index(flag) + 1], expected)
 
     def test_duration_does_not_sum_nested_timers(self):
         from pipeline_tools.logger_utils import ThesisLogger
@@ -283,6 +311,11 @@ class HttpTests(unittest.TestCase):
             try:
                 with request('/api/catalog') as response:
                     self.assertEqual(json.load(response)['total_models'], 18)
+                with request('/api/presets') as response:
+                    self.assertEqual(json.load(response)['presets']['official_low']['values']['gaussians_per_triangle'], 6)
+                with patch('web_dashboard.server.inspect_colmap', return_value=dict(available=True, cuda=False)):
+                    with request('/api/colmap') as response:
+                        self.assertEqual(json.load(response), dict(available=True, cuda=False))
                 with request('/api/run', {'action': 'full_pipeline'}) as response:
                     self.assertEqual(response.status, 202)
                     job_ids = json.load(response)['added']

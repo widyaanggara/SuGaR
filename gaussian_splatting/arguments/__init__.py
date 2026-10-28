@@ -51,6 +51,8 @@ class ModelParams(ParamGroup):
         self._model_path = ""
         self._images = "images"
         self._resolution = -1
+        self.image_downscale = 1
+        self.image_max_size = -1  # Legacy callers keep the original resolution behaviour.
         self._white_background = False
         self.data_device = "cuda"
         self.eval = False

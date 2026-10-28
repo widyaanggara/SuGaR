@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import csv
+import math
 import logging
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
+from pipeline_tools.geometry_metrics import GEOMETRY_COLUMNS
 
 # The queue/3DGS supervisor must never create its own CUDA context.
 # Inspect torch only if the current process has already imported it.
@@ -229,6 +231,15 @@ class ThesisLogger:
         """Menyimpan konfigurasi parameter eksperimen."""
         self.data["parameters"].update(params_dict)
 
+    def set_geometry_metrics(self, metrics):
+        """Record both geometric thresholds explicitly; missing data stays missing."""
+        for key in GEOMETRY_COLUMNS:
+            if key in metrics:
+                value = float(metrics[key])
+                if not math.isfinite(value) or not 0 <= value <= 100:
+                    raise ValueError(f'{key} harus finite dalam rentang 0–100%.')
+                self.data['metrics'][key] = round(value, 4)
+
     def finalize(self, success: bool = True):
         """Menyelesaikan sesi log dan mengekspor rekapitulasi ke JSON, CSV, dan Markdown."""
         self.data["status"] = "COMPLETED" if success else "FAILED"
@@ -282,12 +293,27 @@ class ThesisLogger:
             self.data["status"]
         ]
 
-        file_exists = self.csv_file.exists()
-        with open(self.csv_file, mode="a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            if not file_exists:
-                writer.writerow(headers)
-            writer.writerow(row)
+        values = dict(zip(headers, row))
+        for key, column in GEOMETRY_COLUMNS.items():
+            values[column] = self.data['metrics'].get(key, '-')
+        headers.extend(GEOMETRY_COLUMNS.values())
+        previous = []
+        if self.csv_file.is_file() and self.csv_file.stat().st_size:
+            with self.csv_file.open(encoding='utf-8', newline='') as stream:
+                reader = csv.DictReader(stream)
+                old_headers = reader.fieldnames or []
+                previous = list(reader)
+            # Preserve historical data and any additional columns during schema upgrades.
+            headers.extend(column for column in old_headers if column not in headers)
+            if any(None in entry for entry in previous):
+                raise ValueError('CSV lama memiliki baris tidak sesuai header; tidak ditimpa.')
+        temporary = self.csv_file.with_name(self.csv_file.name + f'.{os.getpid()}.tmp')
+        with temporary.open('w', newline='', encoding='utf-8') as stream:
+            writer = csv.DictWriter(stream, fieldnames=headers, restval='-')
+            writer.writeheader()
+            writer.writerows(previous)
+            writer.writerow(values)
+        temporary.replace(self.csv_file)
 
     def _generate_markdown_report(self):
         """Membaca master CSV dan membuat tabel Markdown rapi yang siap disalin ke Bab 4 Skripsi."""
@@ -326,6 +352,7 @@ class ThesisLogger:
         md_content.append("- **SSIM**: Nilai rentang 0–1, semakin mendekati 1 semakin mirip struktur citra hasil rekonstruksi.")
         md_content.append("- **LPIPS**: Metrik persepsi manusia, semakin rendah nilainya semakin realistis tekstur rendering.")
         md_content.append("- **Chamfer Dist (cm)**: Jarak rata-rata geometri hasil rekonstruksi terhadap data acuan LiDAR (Ground Truth).")
+        md_content.append('- **Precision / Recall / F1 @2cm dan @5cm (%)**: Metrik geometri terhadap LiDAR, bukan klasifikasi kelas patung. Precision mengukur titik rekonstruksi dekat ground truth; Recall mengukur cakupan ground truth. F1 = 2PR/(P+R), atau 0 bila P+R=0. Ambang memakai jarak < 2 cm / < 5 cm.')
         md_content.append("- **Peak VRAM**: Puncak penggunaan memori GPU selama proses berjalan.")
 
         with open(self.md_file, "w", encoding="utf-8") as f:

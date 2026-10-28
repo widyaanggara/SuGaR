@@ -3,859 +3,145 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D Reconstruction Pipeline — 3DGS vs SuGaR</title>
+  <meta name="theme-color" content="#151515">
+  <title>Togog Lab — SuGaR Research Workspace</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;650;700;750;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    *,*::before,*::after{box-sizing:border-box}
+    :root{color-scheme:light;--bg-0:#f6f6f6;--bg-1:#fff;--bg-2:#fafafa;--bg-3:#f1f1f1;--bg-4:#eaeaea;--border:#e5e5e5;--border-hover:#c2c2c2;--text-0:#2b2b2b;--text-1:#434343;--text-2:#6c6c6c;--text-3:#7a7a7a;--text-4:#7e7e7e;--accent:#a62c21;--accent-dim:#faf0ee;--green:#282828;--green-dim:#f2f2f2;--amber:#555555;--amber-dim:#f3f3f3;--red:#a62c21;--red-dim:#faece9;--purple:#777777;--radius:12px;--radius-lg:16px}
+    html{scroll-behavior:smooth;scroll-padding-top:90px}
+    body{margin:0;background:var(--bg-0);color:var(--text-1);font:13px/1.6 'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    button,input,select{font:inherit}button,a{touch-action:manipulation}a{color:inherit;text-decoration:none}button{cursor:pointer}h1,h2,h3,p{margin:0}
+    svg.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+    [hidden]{display:none!important}:focus-visible{outline:3px solid #a62c21;outline-offset:3px}
+    .skip-link{position:fixed;top:-100px;left:20px;z-index:1000;background:#fff;padding:12px}.skip-link:focus{top:12px}
+    .sidebar{position:fixed;inset:0 auto 0 0;width:222px;background:#151515;color:#d5d5d5;padding:30px 20px 22px;display:flex;flex-direction:column;z-index:60}
+    .brand{display:flex;align-items:center;gap:12px;padding:0 10px;color:#fff}.brand-mark{width:38px;height:42px;flex-shrink:0}.brand-name{font-size:20px;font-weight:750;letter-spacing:-.8px}.brand-sub{font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:#aeaeae;margin-top:1px}
+    .nav-caption{font-size:10px;font-weight:600;letter-spacing:1.7px;text-transform:uppercase;color:#a7a7a7;padding:38px 13px 12px}
+    .side-nav{display:grid;gap:7px}.side-nav a{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:8px;font-size:12px;font-weight:500;transition:background .15s,color .15s}.side-nav a:hover{background:#ffffff0d;color:white}.side-nav a.active{background:#ffffff12;color:#fff;box-shadow:inset 2px 0 #cf776e}.side-nav .nav-count{margin-left:auto;font-size:10px;background:#ffffff12;padding:1px 7px;border-radius:5px}
+    .sidebar-project{margin:36px 9px 0;border:1px solid #ffffff20;border-radius:11px;padding:14px}.project-label{color:#adadad;font-size:9px;font-weight:600;letter-spacing:1.3px;text-transform:uppercase}.sidebar-project strong{display:block;color:#faf1ef;font-size:12px;margin:7px 0 5px}.sidebar-project p{font-size:11px;color:#bfbfbf;line-height:1.7}.methods{display:flex;gap:6px;margin-top:12px}.methods span{font:10px 'JetBrains Mono',monospace;color:#e3e3e3;background:#ffffff0c;border:1px solid #ffffff14;border-radius:4px;padding:4px 7px}
+    .sidebar-bottom{margin-top:auto;padding:24px 12px 0;font-size:10px;color:#bababa}.sidebar-bottom strong{display:block;color:#e2e2e2;font-size:11px;font-weight:500;margin-bottom:3px}.status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#cd7166;margin-right:7px;vertical-align:1px}
+    .workspace{margin-left:222px;min-width:0}.topbar{height:70px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 34px;border-bottom:1px solid var(--border);background:#fefefedf;backdrop-filter:blur(12px);position:sticky;top:0;z-index:40}
+    .breadcrumb{display:flex;gap:12px;align-items:center;color:var(--text-3);font-size:12px}.breadcrumb strong{color:var(--text-0);font-weight:550}.topbar-right{display:flex;align-items:center;gap:9px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;border:1px solid transparent;border-radius:7px;font-size:12px;font-weight:550;line-height:1.5;white-space:nowrap;transition:background .15s,border-color .15s,box-shadow .15s}.btn:disabled{opacity:.4;cursor:not-allowed}.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 2px 3px #35353510}.btn-primary:hover:not(:disabled){background:#892219;border-color:#892219;box-shadow:0 3px 8px #34343420}.btn-ghost{background:#fff;color:var(--text-1);border-color:var(--border)}.btn-ghost:hover:not(:disabled){background:var(--bg-3);border-color:var(--border-hover)}.btn-danger{background:var(--red-dim);color:var(--red);border-color:#efd3cd}.btn-danger:hover:not(:disabled){background:#f1d8d1}.btn-sm{padding:6px 10px;font-size:11px}.btn .icon{width:15px;height:15px}.btn-step{font-size:11px;font-weight:500;background:#fff;color:var(--text-2);border:1px solid var(--border);border-radius:6px;padding:7px 8px}.btn-step:hover{background:var(--bg-3);border-color:var(--border-hover)}
+    .main{max-width:1530px;margin:auto;padding:30px 34px 24px}.page-intro{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:26px}.eyebrow{font-size:10px;font-weight:650;color:var(--accent);text-transform:uppercase;letter-spacing:1.7px;margin-bottom:7px}h1{font-size:30px;line-height:1.3;font-weight:650;letter-spacing:-1.1px;color:var(--text-0)}.page-intro p{font-size:12px;color:var(--text-2);margin-top:9px}.intro-tag{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:100px;padding:7px 12px;font-size:10px;color:var(--text-2);white-space:nowrap;background:#ffffff80}.intro-tag .icon{width:14px;height:14px}
+    .stats-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:24px}.stat-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;position:relative;min-width:0}.stat-label{font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:9px}.stat-value{font-size:29px;font-weight:600;line-height:1.25;letter-spacing:-1px;color:var(--text-0);font-variant-numeric:tabular-nums}.stat-sub{font-size:10px;color:var(--text-3);margin-top:9px}.stat-icon{position:absolute;right:18px;top:16px;width:29px;height:29px;display:grid;place-items:center;border-radius:8px;background:var(--bg-3);color:var(--accent)}.stat-icon .icon{width:15px;height:15px}.stat-card:nth-child(3) .stat-icon{color:#555555;background:#f5f5f5}.stat-card:nth-child(4) .stat-icon{color:#a62c21;background:#faf0ee}
+    .panel-heading,.table-head{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px 23px}.section-title{font-size:14px;font-weight:600;color:var(--text-0);letter-spacing:-.2px}.section-subtitle{font-size:11px;color:var(--text-3);margin-top:3px}.heading-label{display:flex;align-items:center;gap:10px}.heading-label>.icon{color:var(--accent)}.quiet-badge{font-size:10px;display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--border);border-radius:5px;background:var(--bg-2);color:var(--text-2);white-space:nowrap}.quiet-badge .status-dot{background:var(--accent);margin:0;width:5px;height:5px}
+    .settings-panel{background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:24px;overflow:hidden}.preset-row{display:flex;align-items:center;gap:18px;padding:16px 23px;background:#faf4f3;border-top:1px solid #ececec;border-bottom:1px solid #ececec}.preset-selector{display:flex;align-items:center;gap:10px;flex-shrink:0}.preset-selector>.icon{color:var(--accent);width:17px;height:17px}.preset-selector label{font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px}.preset-selector select{display:block;min-width:225px;margin-top:3px;border:0;background:transparent;font-size:12px;font-weight:600;color:var(--text-0);padding:2px 20px 2px 0;max-width:100%}.preset-description{font-size:11px;line-height:1.7;color:var(--text-2);flex:1;max-width:560px}.preset-row>.btn{margin-left:auto;background:#ffffff90;font-size:10px}
+    .settings-tabs{display:flex;gap:24px;padding:0 23px;border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:thin}.settings-tab{display:flex;align-items:center;gap:7px;padding:14px 1px 12px;border:0;border-bottom:2px solid transparent;background:none;color:var(--text-3);font-size:11px;font-weight:500;white-space:nowrap}.tab-number{font-size:9px;border:1px solid var(--border);border-radius:4px;padding:0 5px;line-height:16px}.settings-tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}.settings-tab[aria-selected="true"] .tab-number{background:var(--accent-dim);border-color:#dbdbdb}.settings-tab:hover{color:var(--text-0)}
+    .settings-pane{padding:23px;min-width:0}.field-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.field-grid label,.source-fields label{display:flex;flex-direction:column;gap:7px;color:var(--text-1);font-size:11px;font-weight:500;min-width:0}input[type="number"],select{min-width:0;color:var(--text-0);background:#fff;border:1px solid #e1e1e1;border-radius:7px;padding:10px 11px;line-height:1.5;transition:border-color .15s,box-shadow .15s}input[type="number"]:hover,select:hover{border-color:var(--border-hover)}input[type="number"]:focus,select:focus{outline:0;border-color:#a62c21;box-shadow:0 0 0 3px #61616112}input:disabled,select:disabled{background:var(--bg-3);color:var(--text-4);cursor:not-allowed}label small{font-size:10px;font-weight:400;color:var(--text-3);line-height:1.6}.settings-note{font-size:10px;line-height:1.8;color:var(--text-3);margin-top:16px}.settings-footer{padding:11px 23px;border-top:1px solid var(--border);background:var(--bg-2);font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:8px}.settings-footer .icon{width:13px;height:13px}
+    .resolution-preview{padding:12px 15px;background:var(--accent-dim);border:1px solid #eed8d2;border-radius:8px;margin-top:18px;font-size:11px;line-height:1.8;color:#77271f}.source-details{margin-top:15px;font-size:10px;color:var(--text-2)}.source-details summary{cursor:pointer;display:list-item;width:fit-content}.source-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:460px;margin-top:12px}.source-fields input{padding:7px 10px}.source-details p{font-size:10px;color:var(--text-3);margin-top:8px}.capability-line{display:flex;align-items:center;gap:15px;margin-top:18px}.capability-line p{margin:0;font-size:11px;color:var(--text-2)}.checkbox-label{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-1);margin-top:18px}input[type="checkbox"]{accent-color:var(--accent);width:14px;height:14px}.method-note{padding:11px 14px;border:1px solid var(--border);background:var(--bg-2);border-radius:7px;margin-top:18px;color:var(--text-2);font-size:11px}.method-note strong{color:var(--text-1);font-weight:550}
+    .job-strip{display:flex;align-items:center;justify-content:space-between;gap:14px;background:#f3f3f3;border:1px solid #dcdcdc;padding:13px 18px;border-radius:10px;margin-bottom:24px}.job-strip.hidden{display:none}.job-strip-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 2s ease-in-out infinite}.job-strip-text{font-size:12px;font-weight:600;color:var(--accent)}.job-strip-target{font-size:11px;color:var(--text-2)}.job-timer{font:11px 'JetBrains Mono',monospace;color:var(--accent)}@keyframes pulse{50%{opacity:.35}}
+    .table-section{background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}.queue-section{margin-bottom:30px}.table-head{border-bottom:1px solid var(--border);flex-wrap:wrap}.table-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}#queueSummary{font-size:10px;color:var(--text-3);margin-top:4px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left;font-size:11px}th{padding:10px 20px;background:var(--bg-2);color:var(--text-3);font-size:9px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;white-space:nowrap}td{padding:13px 20px;border-top:1px solid #f0f0f0;white-space:nowrap;color:var(--text-1)}td:last-child .btn+.btn{margin-left:6px}tbody tr:hover td{background:#fafafa}.empty-msg{padding:30px 18px;text-align:center;color:var(--text-3);font-size:11px}.empty-msg strong{display:block;color:var(--text-2);font-size:12px;font-weight:500;margin-bottom:4px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px}.section-heading-group{display:flex;align-items:center;gap:10px}.section-counter{padding:1px 7px;border:1px solid var(--border);border-radius:5px;background:#fff;color:var(--text-3);font-size:10px}
+    .filter-bar{display:flex;gap:5px;overflow-x:auto;scrollbar-width:thin;padding:0 0 15px;margin-bottom:2px}.filter-pill{border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-2);padding:6px 11px;font-size:10px;font-weight:500;white-space:nowrap}.filter-pill.active{background:#f7e9e6;color:#a62c21;border-color:#ecd0ca}.filter-pill:hover:not(.active){background:#eeeeee;color:var(--text-0)}
+    .model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-bottom:32px}.class-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;min-width:0;transition:border-color .15s,box-shadow .15s}.class-card:hover{border-color:#cacaca;box-shadow:0 4px 16px #32323210}.class-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid var(--border)}.class-heading{display:flex;align-items:center;gap:10px}.class-number{display:grid;place-items:center;width:33px;height:33px;border-radius:8px;border:1px solid #edd7d1;background:#faf1ef;color:#a62c21;font:10px 'JetBrains Mono',monospace}.class-name{font-size:12px;font-weight:600;color:var(--text-0)}.class-meta{font-size:9px;color:var(--text-3);margin-top:1px}.class-body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.model-cell{padding:17px 18px;min-width:0}.model-cell+.model-cell{border-left:1px solid var(--border)}.model-label{font-size:11px;font-weight:600;color:var(--text-0);margin-bottom:13px;display:flex;justify-content:space-between;align-items:center;gap:6px;overflow-wrap:anywhere}.model-code{font-size:9px;color:var(--text-3);font-weight:400}.pipeline-rows{display:grid;gap:8px;margin-bottom:15px}.pipeline-row{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:10px;color:var(--text-2)}.pipeline-row>span:first-child{display:flex;align-items:center;gap:7px}.stage-index{color:#999999;font:9px 'JetBrains Mono',monospace}.chip{display:inline-flex;align-items:center;gap:4px;border-radius:4px;padding:2px 6px;line-height:1.5;font-size:9px;font-weight:500}.chip-done{background:var(--green-dim);color:var(--green)}.chip-pending{background:var(--bg-3);color:var(--text-3)}.chip-partial{background:#f8eeec;color:#8e3026}.chip-warn{background:var(--amber-dim);color:var(--amber)}.chip-error{background:var(--red-dim);color:var(--red)}
+    .dataset-path{font-size:9px;color:var(--text-3);margin:13px 0;line-height:1.8;overflow-wrap:anywhere}.dataset-path summary{cursor:pointer;width:fit-content}.dataset-path code{display:block;background:var(--bg-2);padding:5px 7px;margin-top:5px;font:9px 'JetBrains Mono',monospace;color:var(--text-2);white-space:normal}.step-buttons{display:grid;grid-template-columns:1fr 1fr;gap:6px}.step-buttons .btn-full{grid-column:1/-1;font-size:10px;padding:8px}.preview-box{display:flex;gap:6px;margin-top:12px}.preview-thumb{width:calc((100% - 12px)/3);height:62px;object-fit:cover;border-radius:5px;cursor:zoom-in;background:var(--bg-3)}.preview-empty{font-size:9px;color:var(--text-3);padding:8px 0 2px;border-top:1px dashed var(--border);width:100%;text-align:center}
+    .terminal{border:1px solid #303030;border-radius:var(--radius-lg);overflow:hidden;margin:0 0 28px;background:#161616}.terminal-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 19px;background:#1e1e1e;border-bottom:1px solid #ffffff10}.terminal-bar-left,.terminal-bar-right{display:flex;align-items:center;gap:10px}.terminal-label{font:10px 'JetBrains Mono',monospace;color:#e2e2e2}.terminal-dots{display:flex;gap:5px;margin-right:4px}.tdot{width:6px;height:6px;border-radius:50%;background:#858585}.tdot-r{background:#8b8b8b}.tdot-y{background:#aaaaaa}.tdot-g{background:#a7a7a7}.terminal .chip{background:#ffffff0c;color:#cbcbcb}.terminal .btn-ghost{background:transparent;color:#cecece;border-color:#ffffff20;font-size:10px}.terminal .btn-ghost:hover{background:#ffffff0c}.toggle-label{display:flex;align-items:center;gap:5px;font-size:10px;color:#c3c3c3}.terminal-output{padding:18px 20px;height:285px;overflow-y:auto;font:11px/1.9 'JetBrains Mono',monospace;color:#cfcfcf;background:#111111}.log-line{white-space:pre-wrap;overflow-wrap:anywhere}.l-dim{color:#acacac}.l-err{color:#ffb4ab}.l-sys{color:#f0b2a7}.l-ok{color:#f4f4f4}.l-warn{color:#d6c6c2}
+    footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:30px;padding:18px 0 0;border-top:1px solid var(--border);font-size:9px;color:var(--text-3)}footer strong{color:var(--text-2);font-weight:600}.toast{position:fixed;bottom:25px;right:28px;max-width:min(440px,calc(100vw - 40px));background:#202020;color:#fff;border:1px solid #5a5a5a;padding:13px 18px;border-radius:9px;font-size:12px;opacity:0;transform:translateY(10px);transition:opacity .18s,transform .18s;pointer-events:none;box-shadow:0 6px 25px #31313125;z-index:150}.toast.show{opacity:1;transform:translateY(0)}
+    .job-log-dialog{width:min(1100px,94vw);max-height:85vh;margin:auto;background:#fff;color:var(--text-1);border:1px solid var(--border);border-radius:14px;padding:0;box-shadow:0 25px 80px #34343438}.job-log-dialog::backdrop{background:#0000007d;backdrop-filter:blur(3px)}.job-log-head{padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--border)}.job-log-title{font-size:13px;font-weight:600;overflow-wrap:anywhere}.job-log-meta{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 20px;color:var(--text-2);font-size:10px}.job-log-meta label{display:flex;align-items:center;gap:5px;white-space:nowrap}.job-log-content{margin:0;padding:18px 20px;height:55vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.8 'JetBrains Mono',monospace;background:#111111;color:#d4d4d4}.lightbox{position:fixed;inset:0;z-index:200;background:#1e1e1eec;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .15s}.lightbox.open{opacity:1;pointer-events:auto}.lightbox img{max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px}.lightbox-close{position:absolute;top:22px;right:24px;padding:8px 14px;border:1px solid #ffffff30;background:#ffffff10;border-radius:6px;color:#fff}.lightbox-caption{margin-top:16px;font-size:12px;color:#e3e3e3}
+    @media(min-width:1700px){.main{padding-top:38px}.model-grid{gap:22px}}
+    @media(max-width:1250px){.sidebar{width:194px;padding-inline:14px}.workspace{margin-left:194px}.topbar{padding-inline:24px}.main{padding:25px 24px}.preset-row{flex-wrap:wrap;gap:12px}.preset-description{min-width:220px}.model-grid{grid-template-columns:1fr}.model-cell{padding:20px}.stats-row{gap:10px}.stat-card{padding:15px}.stat-icon{right:12px;top:12px}.stat-value{font-size:26px}}
+    @media(max-width:850px){.sidebar{width:72px;align-items:center;padding:22px 10px}.brand{padding:0}.brand-copy,.nav-caption,.side-nav a span,.sidebar-project,.sidebar-bottom{display:none}.side-nav{margin-top:32px;gap:12px}.side-nav a{padding:12px}.workspace{margin-left:72px}.breadcrumb{gap:7px;font-size:10px}.field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stats-row{grid-template-columns:repeat(2,minmax(0,1fr))}.page-intro .intro-tag{display:none}.topbar-right .btn .icon{display:none}.topbar-right .btn{font-size:10px;padding:7px 10px}.preset-row>.btn{margin-left:0}.preset-description{flex-basis:100%;order:3}.terminal-bar{flex-wrap:wrap;gap:10px}}
+    @media(max-width:560px){.sidebar{display:none}.workspace{margin:0}.topbar{height:auto;min-height:64px;padding:12px 16px;gap:10px;flex-wrap:wrap}.breadcrumb{width:100%}.topbar-right{width:100%;gap:6px}.topbar-right .btn-primary{margin-left:auto}.main{padding:22px 16px}.page-intro{margin-bottom:20px}h1{font-size:26px}.page-intro p{font-size:11px}.stat-card{padding:14px}.stat-icon{width:24px;height:24px;top:12px;right:10px}.stat-value{font-size:23px}.stat-label{font-size:10px;max-width:calc(100% - 26px)}.panel-heading,.table-head{padding:17px}.quiet-badge{display:none}.preset-row{padding:14px 17px}.preset-selector{width:100%}.preset-selector select{min-width:0;width:100%}.preset-selector label{flex:1}.settings-tabs{padding-inline:17px;gap:20px}.settings-pane{padding:18px 17px}.field-grid{grid-template-columns:1fr;gap:15px}.source-fields{grid-template-columns:1fr 1fr}.settings-footer{padding:12px 17px;align-items:start}.class-header{padding:14px}.class-body{grid-template-columns:1fr}.model-cell+.model-cell{border-left:0;border-top:1px solid var(--border)}.model-cell{padding:18px}.capability-line{align-items:start;flex-direction:column;gap:10px}.terminal-bar-right{flex-wrap:wrap}.terminal-output{height:260px;padding:14px}.job-strip{align-items:start}.job-strip-left{gap:7px}.table-actions .btn{font-size:10px}th,td{padding-inline:15px}.job-log-meta{flex-wrap:wrap}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}}
 
-    :root {
-      --bg-0: #09090b;
-      --bg-1: #0f0f12;
-      --bg-2: #18181b;
-      --bg-3: #1e1e22;
-      --bg-4: #27272a;
-      --border: #27272a;
-      --border-hover: #3f3f46;
-      --text-0: #fafafa;
-      --text-1: #d4d4d8;
-      --text-2: #a1a1aa;
-      --text-3: #71717a;
-      --text-4: #52525b;
-      --blue: #3b82f6;
-      --blue-dim: rgba(59,130,246,0.12);
-      --green: #22c55e;
-      --green-dim: rgba(34,197,94,0.12);
-      --amber: #f59e0b;
-      --amber-dim: rgba(245,158,11,0.12);
-      --red: #ef4444;
-      --red-dim: rgba(239,68,68,0.12);
-      --purple: #a78bfa;
-      --purple-dim: rgba(167,139,250,0.12);
-      --radius: 8px;
-      --radius-lg: 12px;
-    }
-
-    body {
-      background: var(--bg-0);
-      color: var(--text-1);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* Layout */
-    .shell {
-      display: grid;
-      grid-template-columns: 1fr;
-      grid-template-rows: auto 1fr;
-      min-height: 100vh;
-    }
-
-    /* Top bar */
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      background: rgba(9,9,11,0.82);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      padding: 0 28px;
-      height: 54px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-    }
-
-    .topbar-left {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .topbar-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-0);
-      letter-spacing: -0.01em;
-    }
-
-    .topbar-sep {
-      width: 1px;
-      height: 18px;
-      background: var(--border);
-    }
-
-    .topbar-subtitle {
-      font-size: 13px;
-      color: var(--text-3);
-      font-weight: 400;
-    }
-
-    .topbar-right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    /* Buttons */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      font-family: inherit;
-      cursor: pointer;
-      border: 1px solid transparent;
-      transition: background 150ms, border-color 150ms, color 150ms, opacity 150ms;
-      white-space: nowrap;
-      line-height: 1.4;
-    }
-    .btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
-
-    .btn-primary {
-      background: var(--blue);
-      color: #fff;
-      border-color: var(--blue);
-    }
-    .btn-primary:hover:not(:disabled) { filter: brightness(1.12); }
-
-    .btn-danger {
-      background: var(--red-dim);
-      color: var(--red);
-      border-color: rgba(239,68,68,0.25);
-    }
-    .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.2); border-color: var(--red); }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-2);
-      border-color: var(--border);
-    }
-    .btn-ghost:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); border-color: var(--border-hover); }
-
-    .btn-sm {
-      padding: 4px 10px;
-      font-size: 12px;
-    }
-
-    .btn-step {
-      background: var(--bg-2);
-      color: var(--text-2);
-      border: 1px solid var(--border);
-      padding: 5px 10px;
-      font-size: 12px;
-      border-radius: 6px;
-    }
-    .btn-step:hover:not(:disabled) { background: var(--bg-3); color: var(--text-0); border-color: var(--border-hover); }
-
-    /* Main content */
-    .main {
-      padding: 24px 28px 60px;
-      max-width: 1380px;
-      margin: 0 auto;
-      width: 100%;
-    }
-
-    /* Active job strip */
-    .job-strip {
-      background: var(--bg-2);
-      border: 1px solid rgba(59,130,246,0.25);
-      border-radius: var(--radius);
-      padding: 10px 16px;
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .job-strip.hidden { display: none; }
-
-    .job-strip-left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .pulse-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--blue);
-      animation: pulse 1.8s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-
-    .job-strip-text { font-size: 13px; font-weight: 500; color: var(--text-1); }
-    .job-strip-target { color: var(--text-3); font-weight: 400; margin-left: 6px; }
-
-    .job-timer {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-2);
-      letter-spacing: 0.02em;
-    }
-
-    /* Stats row */
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-bottom: 24px;
-    }
-    @media (max-width: 800px) { .stats-row { grid-template-columns: repeat(2, 1fr); } }
-
-    .stat-card {
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px 16px;
-    }
-    .stat-label {
-      font-size: 12px;
-      color: var(--text-3);
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-bottom: 6px;
-    }
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: var(--text-0);
-      letter-spacing: -0.02em;
-    }
-    .stat-sub {
-      font-size: 12px;
-      color: var(--text-4);
-      margin-top: 2px;
-    }
-
-    /* Section headings */
-    .section-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 14px;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    .section-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-0);
-      letter-spacing: -0.01em;
-    }
-
-    /* Filter pills */
-    .filter-bar {
-      display: flex;
-      gap: 4px;
-      background: var(--bg-1);
-      padding: 3px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      overflow-x: auto;
-    }
-    .filter-pill {
-      background: transparent;
-      border: none;
-      color: var(--text-3);
-      padding: 5px 11px;
-      font-size: 12px;
-      font-weight: 500;
-      font-family: inherit;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background 120ms, color 120ms;
-      white-space: nowrap;
-    }
-    .filter-pill.active {
-      background: var(--bg-4);
-      color: var(--text-0);
-    }
-    .filter-pill:hover:not(.active) { color: var(--text-1); }
-
-    /* Model grid */
-    .model-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(640px, 1fr));
-      gap: 12px;
-      margin-bottom: 32px;
-    }
-    @media (max-width: 720px) { .model-grid { grid-template-columns: 1fr; } }
-
-    /* Class card */
-    .class-card {
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-      transition: border-color 150ms;
-    }
-    .class-card:hover { border-color: var(--border-hover); }
-
-    .class-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    .class-name {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-0);
-    }
-
-    .class-body {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-    }
-    @media (max-width: 480px) { .class-body { grid-template-columns: 1fr; } }
-
-    .model-cell {
-      padding: 14px 16px;
-    }
-    .model-cell + .model-cell {
-      border-left: 1px solid var(--border);
-    }
-    @media (max-width: 480px) {
-      .model-cell + .model-cell { border-left: none; border-top: 1px solid var(--border); }
-    }
-
-    .model-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-2);
-      margin-bottom: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    /* Pipeline status list */
-    .pipeline-rows {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      margin-bottom: 12px;
-    }
-    .pipeline-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 12px;
-      color: var(--text-3);
-    }
-
-    /* Indicator chips */
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      line-height: 1.5;
-    }
-    .chip-done { background: var(--green-dim); color: var(--green); }
-    .chip-partial { background: var(--blue-dim); color: var(--blue); }
-    .chip-pending { background: var(--bg-3); color: var(--text-4); }
-    .chip-warn { background: var(--amber-dim); color: var(--amber); }
-
-    /* Step buttons container */
-    .step-buttons {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 5px;
-    }
-    .step-buttons .btn-full { grid-column: 1 / -1; }
-
-    .step-num {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: var(--bg-4);
-      color: var(--text-3);
-      font-size: 10px;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
-
-    /* Preview box */
-    .preview-box {
-      margin-top: 10px;
-      padding-top: 8px;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    .preview-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 6px;
-    }
-    .preview-title {
-      font-size: 10px;
-      font-weight: 600;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .preview-badge {
-      font-size: 9px;
-      font-weight: 600;
-      padding: 1px 5px;
-      border-radius: 3px;
-      letter-spacing: 0.02em;
-    }
-    .preview-badge.dummy {
-      background: rgba(245, 158, 11, 0.12);
-      color: var(--amber);
-      border: 1px solid rgba(245, 158, 11, 0.25);
-    }
-    .preview-badge.live {
-      background: rgba(16, 185, 129, 0.12);
-      color: var(--green);
-      border: 1px solid rgba(16, 185, 129, 0.25);
-    }
-
-    .preview-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 5px;
-    }
-    .preview-item {
-      display: flex;
-      flex-direction: column;
-      cursor: pointer;
-      border-radius: 5px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      background: var(--bg-3);
-      transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
-    }
-    .preview-item:hover {
-      border-color: var(--blue);
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-    }
-    .preview-thumb {
-      width: 100%;
-      height: 48px;
-      object-fit: cover;
-      display: block;
-      background: var(--bg-4);
-    }
-    .preview-item-caption {
-      font-size: 9px;
-      font-weight: 500;
-      color: var(--text-3);
-      padding: 2px 3px;
-      text-align: center;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      background: var(--bg-2);
-      border-top: 1px solid var(--border);
-    }
-    .preview-item:hover .preview-item-caption {
-      color: var(--text-1);
-    }
-
-    .preview-empty {
-      font-size: 11px;
-      color: var(--text-4);
-      padding: 6px 0;
-      text-align: center;
-    }
-
-    /* Lightbox modal */
-    .lightbox {
-      position: fixed;
-      inset: 0;
-      z-index: 999;
-      background: rgba(0,0,0,0.88);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 200ms ease;
-      backdrop-filter: blur(4px);
-    }
-    .lightbox.open { opacity: 1; pointer-events: auto; }
-    .lightbox img {
-      max-width: 88vw;
-      max-height: 80vh;
-      border-radius: 8px;
-      box-shadow: 0 12px 48px rgba(0,0,0,0.8);
-      border: 1px solid rgba(255,255,255,0.1);
-      object-fit: contain;
-    }
-    .lightbox-close {
-      position: absolute;
-      top: 20px;
-      right: 24px;
-      background: var(--bg-3);
-      border: 1px solid var(--border);
-      color: var(--text-1);
-      font-size: 13px;
-      padding: 6px 14px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-family: inherit;
-    }
-    .lightbox-close:hover {
-      background: var(--bg-4);
-      color: #fff;
-    }
-    .lightbox-caption {
-      margin-top: 14px;
-      color: var(--text-2);
-      font-size: 13px;
-      text-align: center;
-      font-weight: 500;
-    }
-
-    /* Terminal */
-    .terminal {
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-      margin-bottom: 32px;
-    }
-
-    .terminal-bar {
-      background: var(--bg-2);
-      border-bottom: 1px solid var(--border);
-      padding: 10px 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .terminal-bar-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .terminal-dots { display: flex; gap: 5px; }
-    .tdot { width: 9px; height: 9px; border-radius: 50%; }
-    .tdot-r { background: #5c3a3a; }
-    .tdot-y { background: #5c5a3a; }
-    .tdot-g { background: #3a5c3e; }
-
-    .terminal-label {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-3);
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .terminal-bar-right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .toggle-label {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 12px;
-      color: var(--text-3);
-      cursor: pointer;
-      user-select: none;
-    }
-    .toggle-label input { accent-color: var(--blue); }
-
-    .terminal-output {
-      padding: 14px 16px;
-      height: 340px;
-      overflow-y: auto;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      line-height: 1.7;
-      color: var(--text-2);
-      background: var(--bg-0);
-    }
-    .terminal-output::-webkit-scrollbar { width: 6px; }
-    .terminal-output::-webkit-scrollbar-track { background: transparent; }
-    .terminal-output::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
-
-    .log-line { white-space: pre-wrap; word-break: break-all; }
-    .log-line.l-ok { color: var(--green); }
-    .log-line.l-err { color: var(--red); }
-    .log-line.l-warn { color: var(--amber); }
-    .log-line.l-sys { color: var(--blue); }
-    .log-line.l-dim { color: var(--text-4); }
-
-    /* Evaluation table */
-    .table-section {
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-    }
-
-    .table-head {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .table-wrap { overflow-x: auto; }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: left;
-      font-size: 13px;
-    }
-    th {
-      background: var(--bg-2);
-      color: var(--text-3);
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 9px 14px;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-    }
-    td {
-      padding: 10px 14px;
-      border-bottom: 1px solid rgba(255,255,255,0.03);
-      color: var(--text-1);
-      white-space: nowrap;
-    }
-    tr:hover td { background: rgba(255,255,255,0.015); }
-
-    .empty-msg {
-      text-align: center;
-      padding: 36px 20px;
-      color: var(--text-4);
-      font-size: 13px;
-    }
-
-    /* Footer */
-    footer {
-      margin-top: 40px;
-      text-align: center;
-      color: var(--text-4);
-      font-size: 12px;
-      padding: 20px 0;
-      border-top: 1px solid var(--border);
-    }
-
-    /* Toast */
-    .toast {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      background: var(--bg-3);
-      color: var(--text-1);
-      padding: 10px 16px;
-      border-radius: var(--radius);
-      font-size: 13px;
-      border: 1px solid var(--border-hover);
-      opacity: 0;
-      transform: translateY(8px);
-      transition: opacity 200ms, transform 200ms;
-      z-index: 100;
-      pointer-events: none;
-    }
-    .toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
-    .queue-settings { display:flex; flex-wrap:wrap; gap:14px; align-items:end; padding:16px; margin-bottom:18px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius); }
-    .queue-settings label { display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--text-3); }
-    .queue-settings input, .queue-settings select { background:var(--bg-3); color:var(--text-1); border:1px solid var(--border); padding:8px; border-radius:6px; max-width:180px; }
-    .queue-settings .checkbox-label { flex-direction:row; align-items:center; padding:8px; }
-    .dataset-path { color:var(--text-3); font-size:11px; line-height:1.7; overflow-wrap:anywhere; margin:10px 0; }
-    .model-label { overflow-wrap:anywhere; }
-    #queueSummary { font-size:12px; color:var(--text-3); margin-top:8px; }
-    .queue-section { margin-bottom:28px; }
+    .metrics-toolbar{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:16px}.metrics-toolbar .eyebrow{margin-bottom:4px}.metrics-toolbar p{font-size:10px;color:var(--text-2);max-width:620px}.metric-filters{display:flex;gap:12px;flex-shrink:0}.metric-filters label{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--text-2)}.metric-filters select{font-size:10px;padding:6px 8px;background:#fff}.metric-direction{font-weight:400;color:var(--accent);margin-left:3px}.stat-value{font-size:27px}.stat-unit{font-size:12px;font-weight:400;letter-spacing:0;margin-left:3px}.stat-sub{min-height:16px}.stat-icon{color:var(--accent);background:#faf0ee}.stat-card:nth-child(n) .stat-icon{color:var(--accent);background:#faf0ee}
+    @media(max-width:1100px){.metrics-toolbar{align-items:start;flex-direction:column;gap:12px}}
+    @media(max-width:560px){.metric-filters{width:100%;flex-wrap:wrap;gap:10px}.metric-filters label{flex:1;justify-content:space-between}.metric-filters select{max-width:140px}.stat-value{font-size:23px}.stat-sub{font-size:9px}.stat-label{font-size:10px}}
   </style>
 </head>
 <body>
+<a class="skip-link" href="#overview">Langsung ke dashboard</a>
+<svg width="0" height="0" aria-hidden="true" style="position:absolute"><defs>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="m12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8M8 5l9 5"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h8"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 3v17h17M8 15l4-5 4 3 5-7"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M5.5 7a8 8 0 0 1 13-2L20 8M4 16l1.5 3a8 8 0 0 0 13-2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-9v1"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5"/></symbol>
+</defs></svg>
 <div class="shell">
-  <!-- Top bar -->
-  <div class="topbar">
-    <div class="topbar-left">
-      <span class="topbar-title">3D Reconstruction Pipeline</span>
-      <div class="topbar-sep"></div>
-      <span class="topbar-subtitle">Vanilla 3DGS vs SuGaR &mdash; 16 Togog Bali + 2 Tanks and Temples</span>
-    </div>
-    <div class="topbar-right">
-      <button class="btn btn-ghost btn-sm" onclick="refreshAll()">Refresh</button>
-      <button id="btnStop" class="btn btn-danger btn-sm" onclick="triggerStop()" disabled>Stop</button>
-      <button id="btnRunAll" class="btn btn-primary btn-sm" onclick="triggerRun('full_pipeline','','')">Antrekan Semua 18 Model</button>
-    </div>
-  </div>
-
-  <div class="main">
-    <!-- Active job strip -->
-    <div id="jobStrip" class="job-strip hidden">
-      <div class="job-strip-left">
-        <div class="pulse-dot"></div>
-        <span class="job-strip-text" id="jobLabel">Running: full_pipeline</span>
-        <span class="job-strip-target" id="jobTarget"></span>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span class="job-timer" id="jobTimer">00:00:00</span>
-        <button class="btn btn-danger btn-sm" onclick="triggerStop()">Stop</button>
-      </div>
-    </div>
-
-    <!-- Stats -->
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-label">Total Models</div>
-        <div class="stat-value" id="kpiTotal">18</div>
-        <div class="stat-sub">8 kelas &times; 2 togog + 2 benchmark</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Completed</div>
-        <div class="stat-value" id="kpiCompleted" style="color:var(--green)">0 / 18</div>
-        <div class="stat-sub" id="kpiCompletedSub">Training + evaluasi visual selesai</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Avg PSNR</div>
-        <div class="stat-value" id="kpiPsnr" style="color:var(--blue)">&mdash;</div>
-        <div class="stat-sub">Render fidelity (dB)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Avg Chamfer Dist</div>
-        <div class="stat-value" id="kpiChamfer" style="color:var(--purple)">&mdash;</div>
-        <div class="stat-sub">Geometry accuracy (cm)</div>
-      </div>
-    </div>
-
-    <!-- Class grid -->
-    <div class="queue-settings">
-      <label>GPU ID <input id="gpuId" type="number" min="0" value="0"></label>
-      <label>Refinement <select id="refinementTime"><option value="short">Short · 2.000 iterasi</option><option value="medium">Medium · 7.000 iterasi</option><option value="long">Long · 15.000 iterasi</option></select></label>
-      <label>Target segitiga mesh <input id="meshTriangles" type="number" min="1000" max="2000000" step="1000" value="250000"></label>
-      <label class="checkbox-label"><input id="resumeCompleted" type="checkbox" checked> Lewati tahap yang selesai</label>
-      <label>Metode LiDAR <select id="evaluationMethod"><option>SuGaR</option><option>3DGS</option></select></label>
-      <label>Skala LiDAR (meter/unit model) <input id="scaleFactor" type="number" min="0" step="any" placeholder="Hasil kalibrasi"></label>
-    </div>
-    <div class="table-section queue-section">
-      <div class="table-head">
-        <div><div class="section-title">Antrean · satu model berjalan</div><div id="queueSummary">Memuat antrean...</div></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button id="btnPause" class="btn btn-ghost btn-sm">Jeda Antrean</button>
-          <button class="btn btn-ghost btn-sm" onclick="queueControl('cancel')">Batalkan Semua yang Menunggu</button>
+  <aside class="sidebar" aria-label="Navigasi utama">
+    <a class="brand" href="#overview" aria-label="Togog Lab, ringkasan"><svg class="brand-mark" viewBox="0 0 40 44" fill="none" aria-hidden="true"><path d="m20 3 16 9v20l-16 9L4 32V12z" stroke="#ededed" stroke-width="1.4"/><path d="m4 12 16 10 16-10M20 22v19M12 8l16 10v18" stroke="#ededed" stroke-width="1.4"/><circle cx="20" cy="22" r="3" fill="#a62c21"/></svg><div class="brand-copy"><div class="brand-name">togog<span style="font-weight:400;color:#cacaca">lab.</span></div><div class="brand-sub">Research workspace</div></div></a>
+    <div class="nav-caption">Workspace</div>
+    <nav class="side-nav">
+      <a href="#overview" class="active" title="Ringkasan"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span>Ringkasan</span></a>
+      <a href="#experimentSettings" title="Pengaturan"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span>Pengaturan</span></a>
+      <a href="#queue" title="Antrean"><svg class="icon" aria-hidden="true"><use href="#i-queue"/></svg><span>Antrean</span></a>
+      <a href="#datasets" title="Dataset & model"><svg class="icon" aria-hidden="true"><use href="#i-cube"/></svg><span>Dataset</span><span class="nav-count" id="kpiTotal">18</span></a>
+      <a href="#logs" title="Log proses"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg><span>Log proses</span></a>
+      <a href="#results" title="Hasil evaluasi"><svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg><span>Hasil evaluasi</span></a>
+    </nav>
+    <div class="sidebar-project"><div class="project-label">Penelitian skripsi</div><strong>Rekonstruksi Togog Bali</strong><p>8 tipologi patung Bali dan 2 scene Tanks and Temples.</p><div class="methods"><span>3DGS</span><span>SuGaR</span></div></div>
+    <div class="sidebar-bottom"><strong><span class="status-dot"></span>Antrean berurutan</strong>Satu pekerjaan pada satu waktu</div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div class="breadcrumb"><svg class="icon" aria-hidden="true"><use href="#i-cube"/></svg><span>Togog Lab</span><span>/</span><strong>Dashboard penelitian</strong></div><div class="topbar-right"><button class="btn btn-ghost btn-sm" onclick="refreshAll()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh</button><button id="btnStop" class="btn btn-danger btn-sm" onclick="triggerStop()" disabled>Stop</button><button id="btnRunAll" class="btn btn-primary" onclick="triggerRun('full_pipeline','','')">Antrekan Semua 18 Model</button></div></header>
+    <main class="main" id="overview">
+      <div class="page-intro"><div><div class="eyebrow">3D reconstruction studio</div><h1>Ruang kerja penelitian.</h1><p>Kelola rekonstruksi, pantau proses, dan bandingkan hasil 3DGS dengan SuGaR.</p></div><div class="intro-tag"><svg class="icon" aria-hidden="true"><use href="#i-cube"/></svg>16 Togog Bali &nbsp;+&nbsp; 2 benchmark</div></div>
+      <div id="jobStrip" class="job-strip hidden"><div class="job-strip-left"><div class="pulse-dot"></div><span class="job-strip-text" id="jobLabel">Pipeline berjalan</span><span class="job-strip-target" id="jobTarget"></span></div><div class="table-actions"><span class="job-timer" id="jobTimer">00:00:00</span><button class="btn btn-danger btn-sm" onclick="triggerStop()">Stop</button></div></div>
+      <div class="metrics-toolbar"><div><div class="eyebrow">Ringkasan hasil</div><p id="metricScope">Rata-rata hasil terakhir per model dan metode; nilai yang belum tersedia ditampilkan —.</p></div><div class="metric-filters"><label>Metode<select id="metricMethod" onchange="renderMetrics()"><option value="all">Semua metode</option><option value="3DGS">3DGS</option><option value="SuGaR">SuGaR</option></select></label><label>Ambang geometri<select id="geometryThreshold" onchange="renderMetrics()"><option value="2">2 cm</option><option value="5">5 cm</option></select></label></div></div>
+      <section class="stats-row" aria-label="Ringkasan penelitian: delapan metrik">
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></div><div class="stat-label">Model selesai</div><div class="stat-value" id="kpiCompleted" style="color:var(--green)">0 / 18</div><div class="stat-sub" id="kpiCompletedSub">Training + evaluasi visual selesai</div></div>
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg></div><div class="stat-label">PSNR <span class="metric-direction">↑</span></div><div class="stat-value" id="kpiPsnr">—</div><div class="stat-sub" id="psnrContext">Desibel (dB) · lebih tinggi lebih baik</div></div>
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg></div><div class="stat-label">SSIM <span class="metric-direction">↑</span></div><div class="stat-value" id="kpiSsim">—</div><div class="stat-sub" id="ssimContext">Kemiripan struktur · lebih tinggi lebih baik</div></div>
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg></div><div class="stat-label">LPIPS <span class="metric-direction">↓</span></div><div class="stat-value" id="kpiLpips">—</div><div class="stat-sub" id="lpipsContext">Jarak perseptual · lebih rendah lebih baik</div></div>
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-cube"/></svg></div><div class="stat-label">Chamfer distance <span class="metric-direction">↓</span></div><div class="stat-value" id="kpiChamfer">—</div><div class="stat-sub" id="chamferContext">Sentimeter (cm) · lebih rendah lebih baik</div></div>
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></div><div class="stat-label">Precision <span class="metric-direction">↑</span></div><div class="stat-value" id="kpiPrecision">—</div><div class="stat-sub" id="precisionContext">Geometri · ambang 2 cm</div></div>
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-queue"/></svg></div><div class="stat-label">Recall <span class="metric-direction">↑</span></div><div class="stat-value" id="kpiRecall">—</div><div class="stat-sub" id="recallContext">Geometri · ambang 2 cm</div></div>
+        <div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg></div><div class="stat-label">F1 Score <span class="metric-direction">↑</span></div><div class="stat-value" id="kpiF1">—</div><div class="stat-sub" id="f1Context">Geometri · ambang 2 cm</div></div>
+      </section>
+      <section class="settings-panel" id="experimentSettings" aria-labelledby="settingsHeading">
+        <div class="panel-heading"><div><div class="heading-label"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><h2 class="section-title" id="settingsHeading">Pengaturan eksperimen</h2></div><p class="section-subtitle">Tentukan konfigurasi sebelum menambahkan model ke antrean.</p></div><span class="quiet-badge">Berlaku untuk pekerjaan baru</span></div>
+        <div class="preset-row"><div class="preset-selector"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg><label>Konfigurasi SuGaR<select id="settingsPreset" onchange="applyPreset(this.value)"><option value="official_high">SuGaR high_poly · long</option><option value="official_low">SuGaR low_poly · long</option><option value="official_short">Uji awal · low_poly + short</option><option value="custom">Kustom</option></select></label></div><p id="presetDescription" class="preset-description">Parameter SuGaR mengacu ke README dan train.py resmi. Pengaturan data/COLMAP merupakan protokol eksperimen terpisah.</p><button class="btn btn-ghost btn-sm" onclick="applyPreset('official_high')">Reset SuGaR resmi</button></div>
+        <p class="settings-note" style="padding:0 23px 14px">Acuan: <a href="https://github.com/Anttwo/SuGaR#quick-start" target="_blank" rel="noopener noreferrer" style="text-decoration:underline">README SuGaR</a> · <a href="https://github.com/Anttwo/SuGaR/blob/main/train.py" target="_blank" rel="noopener noreferrer" style="text-decoration:underline">train.py resmi</a>. Preset hanya mengubah parameter SuGaR; resolusi dan COLMAP tetap sesuai pilihanmu. dn_consistency direkomendasikan repo terbaru; tabel paper memakai konfigurasi regularisasi lain.</p><div class="settings-tabs" role="tablist" aria-label="Kategori pengaturan">
+          <button id="tab-resolution" class="settings-tab" role="tab" aria-selected="true" aria-controls="pane-resolution" onclick="switchSettingsTab('resolution')"><span class="tab-number">01</span>Resolusi foto</button>
+          <button id="tab-colmap" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-colmap" tabindex="-1" onclick="switchSettingsTab('colmap')"><span class="tab-number">02</span>COLMAP</button>
+          <button id="tab-training" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-training" tabindex="-1" onclick="switchSettingsTab('training')"><span class="tab-number">03</span>Training &amp; antrean</button>
+          <button id="tab-lidar" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-lidar" tabindex="-1" onclick="switchSettingsTab('lidar')"><span class="tab-number">04</span>LiDAR <span style="font-size:9px;font-weight:400">opsional</span></button>
         </div>
-      </div>
-      <div class="table-wrap"><table><thead><tr><th>Model</th><th>Pekerjaan</th><th>Status</th><th>Durasi</th><th>Aksi</th></tr></thead><tbody id="queueBody"></tbody></table></div>
-    </div>
-    <div class="section-head">
-      <div class="section-title">Pipeline Status by Class</div>
-      <div class="filter-bar" id="filterBar">
-        <button class="filter-pill active" onclick="filterClass('ALL')">All</button>
-        <button class="filter-pill" onclick="filterClass('Dewa')">Dewa</button>
-        <button class="filter-pill" onclick="filterClass('Dewi')">Dewi</button>
-        <button class="filter-pill" onclick="filterClass('Mitologi')">Mitologi</button>
-        <button class="filter-pill" onclick="filterClass('Penabuh')">Penabuh</button>
-        <button class="filter-pill" onclick="filterClass('Pengapit')">Pengapit</button>
-        <button class="filter-pill" onclick="filterClass('Punakawan')">Punakawan</button>
-        <button class="filter-pill" onclick="filterClass('Raksasa')">Raksasa</button>
-        <button class="filter-pill" onclick="filterClass('Wanara')">Wanara</button>
-      </div>
-    </div>
-
-    <div class="model-grid" id="modelGrid"></div>
-
-    <!-- Terminal -->
-    <div class="terminal">
-      <div class="terminal-bar">
-        <div class="terminal-bar-left">
-          <div class="terminal-dots"><div class="tdot tdot-r"></div><div class="tdot tdot-y"></div><div class="tdot tdot-g"></div></div>
-          <span class="terminal-label" id="termLabel">output</span>
-          <span class="chip chip-pending" id="termStatus">idle</span>
+        <div id="pane-resolution" class="settings-pane" role="tabpanel" aria-labelledby="tab-resolution" tabindex="0">
+          <div class="field-grid"><label>Batas sisi COLMAP (px)<input id="colmapMaxImageSize" type="number" min="256" max="16384" step="1" value="2000"><small>Resolusi ekstraksi fitur. Foto input asli tetap tersimpan.</small></label><label>Downscale training &amp; evaluasi<select id="imageDownscale"><option value="1">1× · tanpa pembagian</option><option value="2">2× · setengah lebar &amp; tinggi</option><option value="4">4× · seperempat</option><option value="8">8× · seperdelapan</option></select><small>Diterapkan bersama batas sisi terpanjang.</small></label><label>Batas sisi training &amp; evaluasi (px)<input id="imageMaxSize" type="number" list="trainingSizes" min="0" max="16384" step="1" value="1600"><small>256–16384 px. Isi 0 untuk tanpa batas tambahan.</small></label></div>
+          <datalist id="trainingSizes"><option value="960"><option value="1280"><option value="1600"><option value="1920"><option value="0"></datalist>
+          <div id="resolutionPreview" class="resolution-preview" aria-live="polite">Memuat perkiraan resolusi...</div>
+          <details class="source-details"><summary>Sesuaikan ukuran foto acuan untuk perkiraan</summary><div class="source-fields"><label>Lebar foto acuan (px)<input id="sourceWidth" type="number" min="1" step="1" value="3840"></label><label>Tinggi foto acuan (px)<input id="sourceHeight" type="number" min="1" step="1" value="2160"></label></div><p>Hanya untuk perkiraan. Ukuran aktual mengikuti foto hasil undistorsi.</p></details>
+          <p class="settings-note">Rasio gambar dipertahankan tanpa memperbesar foto. Kedua metode memakai pengaturan ukuran training dan evaluasi yang sama.</p>
         </div>
-        <div class="terminal-bar-right">
-          <label class="toggle-label"><input type="checkbox" id="chkScroll" checked> Auto-scroll</label>
-          <button class="btn btn-ghost btn-sm" onclick="clearTerm()">Clear</button>
-          <button class="btn btn-ghost btn-sm" onclick="showLiveLogs()">Live</button>
-          <button class="btn btn-ghost btn-sm" onclick="copyLogs()">Copy</button>
+        <div id="pane-colmap" class="settings-pane" role="tabpanel" aria-labelledby="tab-colmap" tabindex="0" hidden>
+          <div class="field-grid"><label>Perangkat ekstraksi &amp; matching<select id="colmapDevice"><option value="auto">Otomatis · CUDA jika tersedia</option><option value="cuda">GPU CUDA · wajib tersedia</option><option value="cpu">CPU</option></select><small>GPU memerlukan build COLMAP dengan dukungan CUDA.</small></label><label>Metode pencocokan<select id="colmapMatcher"><option value="exhaustive">Exhaustive · foto umum</option><option value="sequential">Sequential · frame berurutan</option></select><small>Gunakan Exhaustive untuk foto dengan nama bebas.</small></label><label>Maksimum fitur per foto<input id="colmapMaxFeatures" type="number" min="1024" max="32768" step="1024" value="8192"><small>Lebih banyak fitur memerlukan lebih banyak komputasi.</small></label><label>Overlap sequential<input id="colmapSequentialOverlap" type="number" min="2" max="100" step="1" value="10" disabled><small>Tetangga yang dicocokkan; hanya untuk Sequential.</small></label></div>
+          <div class="capability-line"><button id="btnCheckColmap" class="btn btn-ghost btn-sm" onclick="checkColmap()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Periksa COLMAP</button><p id="colmapCapability" role="status">Memeriksa build COLMAP server...</p></div>
+          <p class="settings-note">Sequential memerlukan nama file yang terurut mengikuti pengambilan, misalnya frame_00001.jpg. Mode GPU mempercepat SIFT; mapper masih dapat memakai CPU.</p>
         </div>
-      </div>
-      <div class="terminal-output" id="termBody">
-        <div class="log-line l-dim">Ready. Select a model or click "Antrekan Semua 18 Model" to start.</div>
-      </div>
-    </div>
-
-    <!-- Metrics table -->
-    <div class="table-section">
-      <div class="table-head">
-        <div class="section-title">Evaluation Metrics</div>
-        <div style="display:flex;gap:6px;">
-          <button class="btn btn-ghost btn-sm" onclick="refreshMetrics()">Reload</button>
-          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>
+        <div id="pane-training" class="settings-pane" role="tabpanel" aria-labelledby="tab-training" tabindex="0" hidden>
+          <div class="field-grid"><label>GPU ID<input id="gpuId" type="number" min="0" step="1" value="0"><small>Indeks GPU sesuai nvidia-smi.</small></label><label>Refinement SuGaR<select id="refinementTime"><option value="short">Short · 2.000 iterasi</option><option value="medium">Medium · 7.000 iterasi</option><option value="long" selected>Long · 15.000 iterasi</option></select><small>Uji Short dahulu sebelum eksperimen lebih panjang.</small></label><label>Parameter mesh SuGaR<input id="meshTriangles" type="number" min="1000" max="2000000" step="1000" value="1000000"><small>Parameter n_vertices_in_mesh upstream; extractor memakai budget decimation segitiga, bukan jaminan jumlah vertex akhir.</small></label></div>
+          <div class="field-grid" style="margin-top:20px"><label>Gaussian per segitiga<select id="gaussiansPerTriangle"><option value="1">1 · high_poly</option><option value="3">3 · kustom</option><option value="4">4 · kustom</option><option value="6">6 · low_poly</option></select><small>Jumlah ini memengaruhi ukuran representasi dan kebutuhan VRAM.</small></label><label>Regularisasi SuGaR<select id="regularization"><option value="dn_consistency">dn_consistency · rekomendasi repo</option><option value="density">density · paper, object-centered</option><option value="sdf">sdf · paper, latar kompleks</option></select><small>Pilih dan catat protokol yang konsisten; preset memakai dn_consistency.</small></label></div><label class="checkbox-label"><input id="resumeCompleted" type="checkbox" checked>Lewati hasil yang sudah selesai dan sesuai pengaturan</label>
+          <div class="method-note"><strong>Satu pekerjaan pada satu waktu.</strong> Baseline 3DGS memakai 30.000 iterasi. Perubahan resolusi/COLMAP memicu ulang tahap yang terdampak.</div>
+          <p class="settings-note">Antrean mencegah pekerjaan berjalan bersamaan. Kebutuhan memori satu scene tetap perlu diuji; preset belum merupakan benchmark dataset kamu.</p>
         </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Class</th>
-              <th>Model</th>
-              <th>Method</th>
-              <th>PSNR (dB)</th>
-              <th>SSIM</th>
-              <th>LPIPS</th>
-              <th>Chamfer (cm)</th>
-              <th>Peak VRAM (GB)</th>
-              <th>Training (min)</th>
-            </tr>
-          </thead>
-          <tbody id="metricsBody">
-            <tr><td colspan="10" class="empty-msg">No evaluation data yet. Run pipeline to generate metrics.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <footer>
-      Skripsi &mdash; 3D Reconstruction of Balinese Statues: 3DGS vs SuGaR Comparison
-    </footer>
+        <div id="pane-lidar" class="settings-pane" role="tabpanel" aria-labelledby="tab-lidar" tabindex="0" hidden>
+          <div class="field-grid"><label>Metode LiDAR<select id="evaluationMethod"><option>SuGaR</option><option>3DGS</option></select><small>Metode yang dibandingkan dengan ground truth LiDAR.</small></label><label>Skala LiDAR (meter/unit model)<input id="scaleFactor" type="number" min="0" step="any" placeholder="Isi hasil kalibrasi"><small>Gunakan kalibrasi masing-masing model.</small></label></div>
+          <div class="method-note">Evaluasi geometri menghitung Chamfer distance serta Precision, Recall, dan F1 pada ambang 2 cm dan 5 cm. Simpan ground truth pada <code>ground_truth/lidar.ply</code>, isi skala model, lalu pilih <strong>Evaluasi LiDAR</strong> di kartu model.</div><p class="settings-note">Metrik geometri menilai ketepatan dan cakupan titik terhadap LiDAR, bukan klasifikasi delapan kelas togog. Evaluasi visual PSNR, SSIM, dan LPIPS dapat dijalankan tanpa LiDAR.</p>
+        </div>
+        <div class="settings-footer"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>Pengaturan utama tersimpan di browser. Perubahan berlaku untuk pekerjaan baru; antrean yang sudah ada tetap memakai konfigurasi sebelumnya.</span></div>
+      </section>
+      <section class="table-section queue-section" id="queue" aria-labelledby="queueHeading"><div class="table-head"><div><div class="heading-label"><svg class="icon" aria-hidden="true"><use href="#i-queue"/></svg><h2 class="section-title" id="queueHeading">Antrean pekerjaan</h2></div><div id="queueSummary">Memuat antrean...</div></div><div class="table-actions"><span class="quiet-badge"><span class="status-dot"></span>1 worker</span><button id="btnPause" class="btn btn-ghost btn-sm">Jeda Antrean</button><button class="btn btn-ghost btn-sm" onclick="queueControl('cancel')">Batalkan yang menunggu</button></div></div><div class="table-wrap"><table><thead><tr><th>Model</th><th>Pekerjaan</th><th>Status</th><th>Durasi</th><th>Aksi</th></tr></thead><tbody id="queueBody"></tbody></table></div></section>
+      <section id="datasets" aria-labelledby="datasetHeading"><div class="section-head"><div><div class="section-heading-group"><h2 class="section-title" id="datasetHeading">Dataset &amp; model</h2><span class="section-counter">9 kelompok</span></div><p class="section-subtitle">Pilih satu model, satu kelas, atau antrekan seluruh dataset.</p></div><span class="quiet-badge">COLMAP → 3DGS → SuGaR → Evaluasi</span></div><div class="filter-bar" id="filterBar" aria-label="Filter kelas dataset"></div><div class="model-grid" id="modelGrid"></div></section>
+      <section id="logs" aria-labelledby="logsHeading"><div class="section-head"><div><h2 class="section-title" id="logsHeading">Log proses</h2><p class="section-subtitle">Output pekerjaan aktif, diperbarui setiap dua detik.</p></div></div><div class="terminal"><div class="terminal-bar"><div class="terminal-bar-left"><div class="terminal-dots" aria-hidden="true"><div class="tdot tdot-r"></div><div class="tdot tdot-y"></div><div class="tdot tdot-g"></div></div><span class="terminal-label" id="termLabel">output</span><span class="chip chip-pending" id="termStatus">idle</span></div><div class="terminal-bar-right"><label class="toggle-label"><input type="checkbox" id="chkScroll" checked>Auto-scroll</label><button class="btn btn-ghost btn-sm" onclick="clearTerm()">Clear</button><button class="btn btn-ghost btn-sm" onclick="showLiveLogs()">Live</button><button class="btn btn-ghost btn-sm" onclick="copyLogs()">Salin log</button></div></div><div class="terminal-output" id="termBody" role="log" aria-label="Output proses"><div class="log-line l-dim">Belum ada proses berjalan. Pilih model untuk menambahkan pekerjaan ke antrean.</div></div></div></section>
+      <section class="table-section" id="results" aria-labelledby="resultsHeading"><div class="table-head"><div><div class="heading-label"><svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg><h2 class="section-title" id="resultsHeading">Hasil evaluasi</h2></div><p class="section-subtitle">Perbandingan kualitas render, geometri, dan penggunaan sumber daya.</p></div><div class="table-actions"><button class="btn btn-ghost btn-sm" onclick="refreshMetrics()">Refresh</button><button class="btn btn-ghost btn-sm" onclick="exportCSV()"><svg class="icon" aria-hidden="true"><use href="#i-export"/></svg>Ekspor CSV</button></div></div><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Kelas</th><th>Model</th><th>Metode</th><th>PSNR (dB)</th><th>SSIM</th><th>LPIPS</th><th>Chamfer (cm)</th><th id="precisionHeader">Precision @2cm (%)</th><th id="recallHeader">Recall @2cm (%)</th><th id="f1Header">F1 @2cm (%)</th><th>Peak VRAM (GB)</th><th>Training (menit)</th></tr></thead><tbody id="metricsBody"><tr><td colspan="13" class="empty-msg">Hasil evaluasi akan muncul setelah pipeline selesai.</td></tr></tbody></table></div></section>
+      <footer><span><strong>togoglab.</strong> &nbsp; Ruang kerja penelitian rekonstruksi patung Bali</span><span>Vanilla 3DGS &amp; SuGaR · Penelitian skripsi</span></footer>
+    </main>
   </div>
 </div>
-
-<div class="toast" id="toast"></div>
-
-<!-- Lightbox -->
-<div class="lightbox" id="lightbox" onclick="closeLightbox()">
-  <button class="lightbox-close" onclick="closeLightbox()">Close (Esc)</button>
-  <img id="lightboxImg" src="" alt="Preview" onclick="event.stopPropagation()">
-  <div class="lightbox-caption" id="lightboxCaption" onclick="event.stopPropagation()"></div>
-</div>
-
+<div class="toast" id="toast" role="status"></div>
+<dialog id="jobLogDialog" class="job-log-dialog" aria-labelledby="jobLogTitle"><div class="job-log-head"><span id="jobLogTitle" class="job-log-title">Log pekerjaan</span><button class="btn btn-ghost btn-sm" onclick="closeJobLogs()">Tutup</button></div><div class="job-log-meta"><span id="jobLogStatus">Memuat...</span><label><input id="jobLogFollow" type="checkbox" checked>Auto-scroll</label></div><pre id="jobLogContent" class="job-log-content" aria-live="polite">Memuat log...</pre></dialog>
+<div class="lightbox" id="lightbox" onclick="closeLightbox()"><button class="lightbox-close" onclick="closeLightbox()">Tutup (Esc)</button><img id="lightboxImg" src="" alt="Preview hasil rekonstruksi" onclick="event.stopPropagation()"><div class="lightbox-caption" id="lightboxCaption" onclick="event.stopPropagation()"></div></div>
 <script src="/dashboard.js"></script>
 </body>
 </html>

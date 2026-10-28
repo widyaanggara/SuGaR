@@ -10,6 +10,7 @@ from pytorch3d.renderer.cameras import _get_sfm_calibration_matrix
 
 from sugar_utils.graphics_utils import focal2fov, fov2focal, getWorld2View2, getProjectionMatrix
 from sugar_utils.general_utils import PILtoTorch
+from gaussian_splatting.utils.resolution_utils import scaled_resolution
 
 
 def load_gs_cameras(source_path, gs_output_path, image_resolution=1, 
@@ -119,6 +120,9 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
                 additional_downscale_factor = max(orig_h, orig_w) / max_img_size
                 downscale_factor = additional_downscale_factor * downscale_factor
             resolution = round(orig_w/(downscale_factor)), round(orig_h/(downscale_factor))
+            if 'SUGAR_IMAGE_MAX_SIZE' in os.environ:
+                resolution = scaled_resolution(orig_w, orig_h,
+                    int(os.environ.get('SUGAR_IMAGE_DOWNSCALE', '1')), int(os.environ['SUGAR_IMAGE_MAX_SIZE']))
             resized_image_rgb = PILtoTorch(image, resolution)
             gt_image = resized_image_rgb[:3, ...]
             
@@ -132,6 +136,9 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
                 additional_downscale_factor = max(height, width) / max_img_size
                 downscale_factor = additional_downscale_factor * downscale_factor
             image_height, image_width = round(height/downscale_factor), round(width/downscale_factor)
+            if 'SUGAR_IMAGE_MAX_SIZE' in os.environ:
+                image_width, image_height = scaled_resolution(width, height,
+                    int(os.environ.get('SUGAR_IMAGE_DOWNSCALE', '1')), int(os.environ['SUGAR_IMAGE_MAX_SIZE']))
         
         gs_camera = GSCamera(
             colmap_id=id, image=gt_image, gt_alpha_mask=None,

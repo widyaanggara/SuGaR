@@ -11,6 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from pipeline_tools.logger_utils import ThesisLogger
+from pipeline_tools.geometry_metrics import metrics_from_distances
+from pipeline_tools.dataset_registry import file_signature
 
 try:
     import open3d as o3d
@@ -66,6 +68,8 @@ def compute_chamfer_distance(source_pcd_path: str,
     """
     if not O3D_AVAILABLE:
         raise ImportError("Pustaka Open3D belum terinstall. Jalankan: pip install open3d")
+    if not math.isfinite(scale_factor) or scale_factor <= 0 or max_samples < 1:
+        raise ValueError('Skala harus finite dan > 0; max_samples harus positif.')
 
     # Fixed sampling seed makes repeated runs comparable. Meshes are sampled on
     # triangle surfaces, rather than comparing only their vertices.
@@ -115,31 +119,12 @@ def compute_chamfer_distance(source_pcd_path: str,
     # Jarak tgt -> src (Completeness)
     dists_tgt_to_src = np.asarray(tgt.compute_point_cloud_distance(src))
 
-    mean_src_to_tgt = np.mean(dists_src_to_tgt)
-    mean_tgt_to_src = np.mean(dists_tgt_to_src)
-
-    # Chamfer distance (meter ke cm)
-    chamfer_dist_m = 0.5 * (mean_src_to_tgt + mean_tgt_to_src)
-    chamfer_dist_cm = chamfer_dist_m * 100.0
-
-    # Akurasi dan kelengkapan pada ambang 2 cm (0.02 m) dan 5 cm (0.05 m) sesuai SOP
-    acc_2cm = np.mean(dists_src_to_tgt < 0.02) * 100.0
-    comp_2cm = np.mean(dists_tgt_to_src < 0.02) * 100.0
-    acc_5cm = np.mean(dists_src_to_tgt < 0.05) * 100.0
-    comp_5cm = np.mean(dists_tgt_to_src < 0.05) * 100.0
-
     return {
+        **metrics_from_distances(dists_src_to_tgt, dists_tgt_to_src),
         "sampling_seed": 0,
         "max_samples": max_samples,
         "icp_inlier_rmse_cm": icp_rmse_cm,
         "alignment_transform": transformation.tolist() if apply_icp else None,
-        "chamfer_distance_cm": round(float(chamfer_dist_cm), 4),
-        "mean_accuracy_cm": round(float(mean_src_to_tgt * 100.0), 4),
-        "mean_completeness_cm": round(float(mean_tgt_to_src * 100.0), 4),
-        "accuracy_at_2cm_pct": round(float(acc_2cm), 2),
-        "completeness_at_2cm_pct": round(float(comp_2cm), 2),
-        "accuracy_at_5cm_pct": round(float(acc_5cm), 2),
-        "completeness_at_5cm_pct": round(float(comp_5cm), 2),
     }
 
 
@@ -197,7 +182,8 @@ def main():
         logger.start_stage("Evaluasi_Geometri_LiDAR")
         aligned_out = PROJECT_ROOT / "outputs" / "logs" / "evaluation_reports" / f"{args.statue_class}_{args.model_id}_{args.method}_aligned.ply"
         try:
-            logger.log("Menjalankan penyelarasan ICP otomatis terhadap LiDAR...")
+            logger.log('Evaluasi terhadap LiDAR tanpa ICP; model harus sudah selaras.' if args.no_icp
+                       else 'Menjalankan penyelarasan ICP otomatis terhadap LiDAR...')
             geo_metrics = compute_chamfer_distance(
                 source_pcd_path=args.model_path,
                 target_pcd_path=args.gt_lidar,
@@ -210,6 +196,20 @@ def main():
             logger.log(f"Chamfer Distance: {chamfer_cm:.4f} cm")
             logger.log(f"Akurasi (< 2cm): {geo_metrics['accuracy_at_2cm_pct']}%, Kelengkapan (< 2cm): {geo_metrics['completeness_at_2cm_pct']}%")
             logger.log(f"Akurasi (< 5cm): {geo_metrics['accuracy_at_5cm_pct']}%, Kelengkapan (< 5cm): {geo_metrics['completeness_at_5cm_pct']}%")
+            for threshold in (2, 5):
+                logger.log(f"Geometri < {threshold} cm — Precision: {geo_metrics[f'precision_at_{threshold}cm_pct']:.4f}%, "
+                           f"Recall: {geo_metrics[f'recall_at_{threshold}cm_pct']:.4f}%, "
+                           f"F1: {geo_metrics[f'f1_at_{threshold}cm_pct']:.4f}%")
+            logger.set_geometry_metrics(geo_metrics)
+            report = dict(geo_metrics, method=args.method, statue_class=args.statue_class, model_id=args.model_id,
+                model_path=str(model_path.resolve()), model_signature=file_signature(model_path),
+                gt_lidar_path=str(Path(args.gt_lidar).resolve()), gt_signature=file_signature(Path(args.gt_lidar)),
+                scale_factor_to_meters=args.scale_factor, apply_icp=not args.no_icp)
+            geometry_dir = PROJECT_ROOT / 'outputs' / args.method.lower() / args.statue_class / args.model_id / 'geometry'
+            geometry_dir.mkdir(parents=True, exist_ok=True)
+            temporary = geometry_dir / 'metrics.json.tmp'
+            temporary.write_text(json.dumps(report, indent=2), encoding='utf-8')
+            temporary.replace(geometry_dir / 'metrics.json')
         except Exception as e:
             logger.log(f"Gagal menghitung Chamfer Distance: {str(e)}", level="error")
             logger.end_stage("Evaluasi_Geometri_LiDAR")

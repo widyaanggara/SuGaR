@@ -17,6 +17,11 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pipeline_tools.recovery_state import CheckpointStore
+from pipeline_tools.dataset_registry import file_signature
+from sugar_utils.training_recovery import rng_state, restore_rng, atomic_torch_save
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 import uuid
@@ -30,12 +35,45 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from,
+             recovery_config=None, resume_training=False):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
+    store, recovered = None, None
+    if recovery_config:
+        identity = json.loads(Path(recovery_config).read_text(encoding='utf-8'))
+        identity = {'run': identity, 'torch': str(torch.__version__), 'numpy': str(numpy.__version__)}
+        store = CheckpointStore(Path(scene.model_path) / 'recovery/3dgs', identity)
+        if resume_training:
+            def validate(state, iteration):
+                if (not 0 < iteration <= opt.iterations or len(state['model']) != 12
+                        or not state['model'][10].get('param_groups') or 'rng' not in state):
+                    raise ValueError('Checkpoint 3DGS tidak lengkap.')
+                names = [camera.image_name for camera in scene.getTrainCameras()]
+                if len(names) != len(set(names)) or sorted(state['camera_order']) != sorted(names):
+                    raise ValueError('Kamera training berbeda dari checkpoint.')
+                if not set(state['remaining_cameras']).issubset(names):
+                    raise ValueError('Urutan kamera checkpoint tidak valid.')
+                if iteration >= 7000:
+                    required = Path(scene.model_path) / 'point_cloud/iteration_7000/point_cloud.ply'
+                    if not required.is_file() or not required.stat().st_size:
+                        raise ValueError('PLY iterasi 7000 untuk SuGaR belum lengkap; checkpoint ini tidak dapat dilewati.')
+                for value in state['model'][1:10]:
+                    if not torch.isfinite(value).all():
+                        raise ValueError('Parameter 3DGS tidak finite.')
+                count = len(state['model'][1])
+                if count == 0 or any(len(value) != count for value in state['model'][1:10]):
+                    raise ValueError('Jumlah parameter/statistik Gaussian tidak konsisten.')
+                if iteration >= 7000 and state.get('baseline_7000_signature') != file_signature(required):
+                    raise ValueError('PLY iterasi 7000 berubah setelah checkpoint disimpan.')
+            recovered, first_iter = store.load(lambda path: torch.load(str(path), weights_only=False), validate)
+            if recovered:
+                gaussians.restore(recovered['model'], opt)
+            else:
+                print('[RESUME] Belum ada checkpoint berkala yang cocok. Checkpoint lama tanpa metadata tidak diasumsikan aman; training mulai dari awal.', flush=True)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -48,6 +86,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
+    if recovered:
+        cameras = {camera.image_name: camera for camera in scene.getTrainCameras()}
+        scene.train_cameras[1.0] = [cameras[name] for name in recovered['camera_order']]
+        viewpoint_stack = [cameras[name] for name in recovered['remaining_cameras']]
+        ema_loss_for_log = recovered['ema_loss']
+        restore_rng(recovered['rng'])
+        if first_iter == opt.iterations:
+            scene.save(opt.iterations)
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     for iteration in range(first_iter, opt.iterations + 1):        
@@ -131,7 +177,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+                atomic_torch_save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+            if store and (iteration % 1000 == 0 or iteration in saving_iterations):
+                store.save({'model': gaussians.capture(), 'rng': rng_state(),
+                    'baseline_7000_signature': file_signature(Path(scene.model_path) / 'point_cloud/iteration_7000/point_cloud.ply') if iteration >= 7000 else None,
+                    'camera_order': [camera.image_name for camera in scene.getTrainCameras()],
+                    'remaining_cameras': [camera.image_name for camera in viewpoint_stack],
+                    'ema_loss': ema_loss_for_log}, iteration, torch.save)
+                print(f'[CHECKPOINT] 3DGS iterasi {iteration} tersimpan atomik (dua slot).', flush=True)
 
 def prepare_output_and_logger(args):    
     if not args.model_path:
@@ -208,6 +261,8 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument('--recovery_config', default=None)
+    parser.add_argument('--resume_training', action='store_true')
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -221,7 +276,8 @@ if __name__ == "__main__":
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from,
+             args.recovery_config, args.resume_training)
     with open(os.path.join(args.model_path, 'run_statistics.json'), 'w', encoding='utf-8') as stats_file:
         json.dump({'peak_allocated_gb': torch.cuda.max_memory_allocated() / (1024 ** 3),
                    'peak_reserved_gb': torch.cuda.max_memory_reserved() / (1024 ** 3),

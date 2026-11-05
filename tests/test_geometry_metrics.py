@@ -91,7 +91,8 @@ class GeometryMetricsTests(unittest.TestCase):
                 loggers.append(logger)
                 return logger
             namespace = dict(argparse=argparse, Path=Path, sys=sys, math=math, json=json,
-                ThesisLogger=factory, PROJECT_ROOT=root, compute_chamfer_distance=compute, file_signature=file_signature)
+                ThesisLogger=factory, PROJECT_ROOT=root, compute_chamfer_distance=compute, file_signature=file_signature,
+                LIDAR_UNITS={'m': 1, 'cm': .01, 'mm': .001})
             exec(compile(ast.Module(body=[main], type_ignores=[]), str(path), 'exec'), namespace)
             argv = ['05_evaluate_comparison.py', '--statue_class', 'Dewa', '--model_id', 'model_01',
                     '--method', 'SuGaR', '--model_path', str(source), '--gt_lidar', str(target),

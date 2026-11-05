@@ -40,6 +40,31 @@ def spec(model='model_01', action='full_pipeline', method='SuGaR'):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_existing_colmap_bulk_start_filters_incomplete_models_and_freezes_start_point(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scene = root / 'datasets/Dewa/model_01'
+            write(scene / 'images/imported.jpg')
+            for name in ('cameras', 'images', 'points3D'):
+                write(scene / 'sparse/0' / (name + '.bin'))
+            write(root / 'datasets/Dewa/model_02/input/a.jpg')
+            jobs, skipped = prepare_jobs(dict(action='full_pipeline', pipeline_start='existing_colmap',
+                colmap_max_image_size=2000, colmap_device='auto', resume=False), root)
+            self.assertEqual(len(jobs), 1)
+            self.assertTrue(any('Dewa/model_02' in reason and 'COLMAP' in reason for reason in skipped))
+            self.assertEqual(jobs[0]['pipeline_start'], 'existing_colmap')
+            command = build_command(jobs[0], root)
+            self.assertIn('--skip_colmap', command)
+            self.assertIn('--no_resume', command)
+            self.assertTrue(command[2].endswith('batch_run_all.py'))
+            automatic, _ = prepare_jobs(dict(action='full_pipeline'), root)
+            self.assertEqual(len(automatic), 2)
+            self.assertNotIn('--skip_colmap', build_command(automatic[0], root))
+            for invalid in (dict(pipeline_start=True), dict(pipeline_start='wrong'),
+                            dict(action='3dgs', class_name='Dewa', model_id='model_01', pipeline_start='existing_colmap')):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    prepare_jobs(invalid, root)
+
     def test_18_slots_idempotent_and_markers_are_not_photos(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -103,6 +128,68 @@ class WorkspaceTests(unittest.TestCase):
 
 
 class QueueTests(unittest.TestCase):
+    def test_restart_retry_stays_paused_and_recovery_is_first_after_resume(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write(root / 'outputs/queue/state.json', json.dumps({'paused': False, 'jobs': [
+                dict(spec('model_01'), id='interrupted', status='RUNNING', created_at=1, started_at=1),
+                dict(spec('model_02'), id='waiting', status='QUEUED', created_at=2, started_at=None)]}))
+            queue = JobQueue(root, lambda _: self.fail('Must remain paused'), start_worker=False)
+            try:
+                self.assertTrue(queue.paused)
+                self.assertEqual(queue.jobs[0]['status'], 'INTERRUPTED')
+                result = queue.retry('interrupted')
+                snapshot = queue.snapshot()
+                self.assertTrue(snapshot['paused'])
+                self.assertFalse(snapshot['is_running'])
+                positions = {j['id']: j['queue_position'] for j in snapshot['jobs']}
+                self.assertEqual(positions[result['job_id']], 1)
+                self.assertEqual(positions['waiting'], 2)
+            finally:
+                queue.close()
+            events = root / 'order.txt'
+            def builder(job):
+                code = ('from pathlib import Path; '
+                        f'Path({str(events)!r}).open("a").write({job["model_id"]!r}+"\\n")')
+                return [sys.executable, '-c', code]
+            # Priority survives another server restart before the user resumes.
+            reopened = JobQueue(root, builder)
+            try:
+                self.assertTrue(reopened.paused)
+                self.assertFalse(events.exists())
+                reopened.set_paused(False)
+                wait_until(lambda: reopened.snapshot()['counts'].get('COMPLETED') == 2)
+                self.assertEqual(events.read_text().splitlines(), ['model_01', 'model_02'])
+            finally:
+                reopened.close()
+
+    def test_recovery_runs_after_active_job_and_before_fresh_pending_jobs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            events, release = root / 'events', root / 'release'
+            def builder(job):
+                code = ('from pathlib import Path; import time; '
+                        f'p=Path({str(events)!r}); '
+                        f'p.open("a").write({job["model_id"]!r}+"\\n"); ')
+                if job['model_id'] == 'active':
+                    code += f'release=Path({str(release)!r}); exec("while not release.exists():\\n time.sleep(.01)"); '
+                return [sys.executable, '-c', code]
+            queue = JobQueue(root, builder)
+            try:
+                queue.enqueue([spec('active'), spec('fresh')])
+                wait_until(lambda: events.exists())
+                active_id = queue.active_id
+                with queue.condition:
+                    queue.jobs.append(dict(spec('recovery'), id='old', status='INTERRUPTED',
+                                           created_at=0, started_at=0, finished_at=0))
+                queue.retry('old')
+                self.assertEqual(queue.active_id, active_id, 'Recovery must not preempt active work')
+                release.write_text('go')
+                wait_until(lambda: queue.snapshot()['counts'].get('COMPLETED') == 3)
+                self.assertEqual(events.read_text().splitlines(), ['active', 'recovery', 'fresh'])
+            finally:
+                queue.close()
+
     def test_real_subprocesses_are_fifo_and_failures_continue(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -192,6 +279,95 @@ class QueueTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_automatic_pipeline_reuses_imported_colmap_despite_missing_or_foreign_receipt(self):
+        from pipeline_tools import batch_run_all as batch
+        for receipt in (None, '{"max_image_size": 4000}', 'invalid receipt'):
+            with self.subTest(receipt=receipt), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                scene = root / 'datasets/Dewa/model_01'
+                write(scene / 'images/imported.jpg')
+                for name in ('cameras', 'images', 'points3D'):
+                    write(scene / 'sparse/0' / (name + '.bin'))
+                if receipt is not None:
+                    write(scene / 'colmap_settings.json', receipt)
+                before = {path: file_signature(path) for path in scene.rglob('*') if path.is_file()}
+                with patch.object(batch, 'run_stage') as stage:
+                    result = batch.process_single_statue(scene, 'Dewa', 'model_01', root=root,
+                        colmap_max_image_size=2000, colmap_device='auto')
+                self.assertEqual(result, 'COMPLETED')
+                self.assertEqual([call.args[0] for call in stage.call_args_list],
+                    ['03_train_3dgs.py', '04_train_sugar.py', '06_evaluate_rendering.py', '06_evaluate_rendering.py'])
+                self.assertTrue(all('--no_resume' not in call.args[1] for call in stage.call_args_list))
+                self.assertEqual(before, {path: file_signature(path) for path in before})
+
+    def test_automatic_pipeline_keeps_completed_3dgs_and_passes_partial_sugar_to_recovery(self):
+        from pipeline_tools import batch_run_all as batch
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scene = root / 'datasets/Dewa/model_01'
+            write(scene / 'images/imported.jpg')
+            for name in ('cameras', 'images', 'points3D'):
+                write(scene / 'sparse/0' / (name + '.bin'))
+            baseline = root / 'outputs/3dgs/Dewa/model_01'
+            write(baseline / 'cameras.json', '[]')
+            for iteration in (7000, 30000):
+                write(baseline / f'point_cloud/iteration_{iteration}/point_cloud.ply')
+            write(baseline / 'training_settings.json', json.dumps(dict(image_downscale=1,
+                image_max_size=1600, colmap_signature=colmap_signature(scene))))
+            partial = root / 'outputs/sugar/Dewa/model_01/recovery/snapshot.pt'
+            write(partial, 'saved state must remain untouched by the batch runner')
+            before = file_signature(partial)
+            with patch.object(batch, 'run_stage') as stage:
+                batch.process_single_statue(scene, 'Dewa', 'model_01', root=root, colmap_max_image_size=2000)
+            self.assertEqual([call.args[0] for call in stage.call_args_list],
+                ['04_train_sugar.py', '06_evaluate_rendering.py', '06_evaluate_rendering.py'])
+            self.assertNotIn('--no_resume', stage.call_args_list[0].args[1])
+            self.assertEqual(file_signature(partial), before)
+
+    def test_disabling_resume_explicitly_rebuilds_existing_colmap(self):
+        from pipeline_tools import batch_run_all as batch
+        with tempfile.TemporaryDirectory() as temporary:
+            scene = Path(temporary)
+            write(scene / 'images/imported.jpg')
+            for name in ('cameras', 'images', 'points3D'):
+                write(scene / 'sparse/0' / (name + '.bin'))
+            with patch.object(batch, 'run_stage', side_effect=subprocess.CalledProcessError(2, 'colmap')) as stage:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    batch.process_single_statue(scene, 'Dewa', 'model_01', resume=False)
+            self.assertEqual(stage.call_args.args[0], '02_run_colmap.py')
+
+    def test_explicit_imported_colmap_runs_all_remaining_stages_without_colmap_or_input_photos(self):
+        from pipeline_tools import batch_run_all as batch
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scene = root / 'datasets/Dewa/model_01'
+            write(scene / 'images/imported.jpg')
+            for name in ('cameras', 'images', 'points3D'):
+                write(scene / 'sparse/0' / (name + '.bin'))
+            # A receipt copied from elsewhere may have unknown/mismatched metadata.
+            write(scene / 'colmap_settings.json', '{"max_image_size": 4000}')
+            before = {path: file_signature(path) for path in scene.rglob('*') if path.is_file()}
+            with patch.object(batch, 'run_stage') as stage:
+                result = batch.process_single_statue(scene, 'Dewa', 'model_01', root=root,
+                    skip_colmap=True, resume=False, colmap_max_image_size=2000, colmap_device='auto')
+            self.assertEqual(result, 'COMPLETED')
+            self.assertEqual([call.args[0] for call in stage.call_args_list],
+                ['03_train_3dgs.py', '04_train_sugar.py', '06_evaluate_rendering.py', '06_evaluate_rendering.py'])
+            methods = [call.args[1][call.args[1].index('--method') + 1] for call in stage.call_args_list[-2:]]
+            self.assertEqual(methods, ['3DGS', 'SuGaR'])
+            self.assertEqual(before, {path: file_signature(path) for path in before})
+
+    def test_missing_imported_colmap_fails_before_any_stage_even_if_raw_video_exists(self):
+        from pipeline_tools import batch_run_all as batch
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write(root / 'raw_video/video.mp4')
+            write(root / 'images/imported.jpg')
+            write(root / 'sparse/0/cameras.bin')
+            with patch.object(batch, 'run_stage') as stage, self.assertRaisesRegex(RuntimeError, 'COLMAP tidak dijalankan ulang'):
+                batch.process_single_statue(root, 'Dewa', 'model_01', skip_colmap=True)
+            stage.assert_not_called()
+
     def test_stages_and_both_evaluations_then_resume(self):
         from pipeline_tools import batch_run_all as batch
         with tempfile.TemporaryDirectory() as temporary:
@@ -311,6 +487,19 @@ class HttpTests(unittest.TestCase):
             try:
                 with request('/api/catalog') as response:
                     self.assertEqual(json.load(response)['total_models'], 18)
+                with request('/api/model-name', dict(class_name='Dewa', model_id='model_01', display_name='Ganesha')) as response:
+                    self.assertEqual(json.load(response)['display_name'], 'Ganesha')
+                with request('/api/status') as response:
+                    model = json.load(response)['Dewa']['model_01']
+                    self.assertEqual(model['display_name'], 'Ganesha')
+                    self.assertEqual(model['input_path'], 'datasets/Dewa/model_01/input/')
+                self.assertEqual(queue.snapshot()['counts'].get('QUEUED', 0), 0)
+                for body in ({}, dict(class_name='Dewa', model_id='../model_01', display_name='Name'),
+                             dict(class_name='Dewa', model_id='model_01', display_name=['Name'])):
+                    with self.assertRaises(urllib.error.HTTPError) as error:
+                        request('/api/model-name', body)
+                    self.assertEqual(error.exception.code, 400)
+                    error.exception.close()
                 with request('/api/presets') as response:
                     self.assertEqual(json.load(response)['presets']['official_low']['values']['gaussians_per_triangle'], 6)
                 with patch('web_dashboard.server.inspect_colmap', return_value=dict(available=True, cuda=False)):
@@ -326,9 +515,26 @@ class HttpTests(unittest.TestCase):
                     self.assertEqual(json.load(response)['counts']['QUEUED'], 18)
                 with request('/api/run', {'action': 'full_pipeline'}) as response:
                     self.assertEqual(len(json.load(response)['duplicates']), 18)
+                queue.jobs[0]['status'] = 'INTERRUPTED'
+                with request('/api/queue/retry', {'job_id': job_ids[0], 'gpu': 999}) as response:
+                    recovered = json.load(response)
+                    self.assertTrue(recovered['promoted'])
+                    recovery_job = next(job for job in queue.jobs if job['id'] == recovered['job_id'])
+                    self.assertEqual(recovery_job['gpu'], 0, 'Retry must use server-side original settings')
+                    self.assertTrue(recovery_job['resume'])
+                with request('/api/queue/retry', {'job_id': job_ids[0]}) as response:
+                    self.assertEqual(json.load(response)['job_id'], recovered['job_id'])
+                self.assertTrue(queue.paused)
+                for body in ({'job_id': 'missing'}, {'job_id': []}, {}):
+                    with self.assertRaises(urllib.error.HTTPError) as error:
+                        request('/api/queue/retry', body)
+                    self.assertEqual(error.exception.code, 400)
+                    error.exception.close()
                 with request('/api/metrics.csv') as response:
                     self.assertIn('attachment', response.headers['Content-Disposition'])
-                    self.assertIn(b'Dewa,SuGaR', response.read())
+                    csv_data = response.read()
+                    self.assertIn(b'Dewa,SuGaR', csv_data)
+                    self.assertIn(b'Nama Model', csv_data)
                 for body in ({'action': 'execute'}, [], {'class_name': '..'}):
                     with self.assertRaises(urllib.error.HTTPError) as error:
                         request('/api/run', body)

@@ -13,6 +13,7 @@ sys.path.append(str(PROJECT_ROOT))
 from pipeline_tools.logger_utils import ThesisLogger
 from pipeline_tools.geometry_metrics import metrics_from_distances
 from pipeline_tools.dataset_registry import file_signature
+from pipeline_tools.geometry_config import LIDAR_UNITS
 
 try:
     import open3d as o3d
@@ -61,15 +62,21 @@ def compute_chamfer_distance(source_pcd_path: str,
                              max_samples: int = 100000,
                              scale_factor: float = 1.0,
                              apply_icp: bool = True,
-                             save_aligned_path: str = None):
+                             save_aligned_path: str = None,
+                             auto_align: bool = False,
+                             lidar_unit: str = 'm'):
     """
     Menghitung Chamfer Distance dan akurasi/kelengkapan geometri (cm)
     terhadap Ground Truth LiDAR dengan penyelarasan ICP otomatis.
     """
     if not O3D_AVAILABLE:
         raise ImportError("Pustaka Open3D belum terinstall. Jalankan: pip install open3d")
-    if not math.isfinite(scale_factor) or scale_factor <= 0 or max_samples < 1:
+    if (not auto_align and (scale_factor is None or not math.isfinite(scale_factor) or scale_factor <= 0)) or max_samples < 1:
         raise ValueError('Skala harus finite dan > 0; max_samples harus positif.')
+    if lidar_unit not in LIDAR_UNITS:
+        raise ValueError('Satuan LiDAR harus m, cm, atau mm.')
+    if auto_align and not apply_icp:
+        raise ValueError('Mode otomatis harus mengaktifkan penyelarasan.')
 
     # Fixed sampling seed makes repeated runs comparable. Meshes are sampled on
     # triangle surfaces, rather than comparing only their vertices.
@@ -93,26 +100,46 @@ def compute_chamfer_distance(source_pcd_path: str,
     if len(src.points) == 0 or len(tgt.points) == 0:
         raise ValueError("Point cloud sumber atau target kosong!")
 
+    if not np.isfinite(np.asarray(src.points)).all() or not np.isfinite(np.asarray(tgt.points)).all():
+        raise ValueError('Koordinat mengandung NaN atau infinity.')
+    # Convert GT around the origin, preserving absolute coordinates consistently.
+    tgt.scale(LIDAR_UNITS[lidar_unit], center=(0, 0, 0))
+    # Fixed bounded samples for registration AND metrics; keep full object coverage.
+    sampling = np.random.default_rng(0)
+    if len(src.points) > max_samples:
+        src = src.select_by_index(sampling.choice(len(src.points), max_samples, replace=False).tolist())
+    if len(tgt.points) > max_samples:
+        tgt = tgt.select_by_index(sampling.choice(len(tgt.points), max_samples, replace=False).tolist())
+
     # 1. Terapkan faktor skala jika diberikan
-    if scale_factor != 1.0:
+    scale_transform = np.eye(4)
+    if not auto_align and scale_factor != 1.0:
+        center = src.get_center()
+        scale_transform[:3, :3] *= scale_factor
+        scale_transform[:3, 3] = center * (1 - scale_factor)
         src.scale(scale_factor, center=src.get_center())
 
     # 2. Lakukan registrasi ICP otomatis jika diaktifkan
     icp_rmse_cm = None
-    if apply_icp:
+    alignment_details = {}
+    if auto_align:
+        from pipeline_tools.geometry_alignment import automatic_similarity_alignment
+        transformation, alignment_details = automatic_similarity_alignment(
+            np.asarray(src.points), np.asarray(tgt.points))
+        src.transform(transformation)
+        scale_factor = alignment_details['scale_factor_to_meters']
+    elif apply_icp:
         src, transformation, rmse = align_point_clouds_icp(src, tgt, max_correspondence_distance=0.08)
+        transformation = transformation @ scale_transform
         icp_rmse_cm = round(float(rmse * 100.0), 4)
 
     # 3. Simpan model yang sudah selaras (untuk visualisasi bab 4 skripsi)
     if save_aligned_path:
         Path(save_aligned_path).parent.mkdir(parents=True, exist_ok=True)
-        o3d.io.write_point_cloud(str(save_aligned_path), src)
-
-    # Subsampling untuk efisiensi komputasi jika terlalu padat
-    if len(src.points) > max_samples:
-        src = src.random_down_sample(max_samples / len(src.points))
-    if len(tgt.points) > max_samples:
-        tgt = tgt.random_down_sample(max_samples / len(tgt.points))
+        if not o3d.io.write_point_cloud(str(save_aligned_path), src):
+            raise OSError('Gagal menyimpan rekonstruksi yang telah diselaraskan.')
+        if not o3d.io.write_point_cloud(str(Path(save_aligned_path).with_name('ground_truth_meters.ply')), tgt):
+            raise OSError('Gagal menyimpan LiDAR acuan dalam meter.')
 
     # Jarak src -> tgt (Accuracy)
     dists_src_to_tgt = np.asarray(src.compute_point_cloud_distance(tgt))
@@ -124,7 +151,11 @@ def compute_chamfer_distance(source_pcd_path: str,
         "sampling_seed": 0,
         "max_samples": max_samples,
         "icp_inlier_rmse_cm": icp_rmse_cm,
-        "alignment_transform": transformation.tolist() if apply_icp else None,
+        "alignment_transform": (transformation if apply_icp else scale_transform).tolist(),
+        "scale_factor_to_meters": scale_factor,
+        "lidar_unit": lidar_unit,
+        "lidar_unit_to_meters": LIDAR_UNITS[lidar_unit],
+        **alignment_details,
     }
 
 
@@ -136,7 +167,10 @@ def main():
     parser.add_argument("--model_path", "-p", type=str, required=True, help="Path ke file model (.ply atau .obj).")
     parser.add_argument("--gt_lidar", "-g", type=str, default=None, help="Path ke point cloud LiDAR ground truth (.ply).")
     parser.add_argument("--scale_factor", type=float, default=None,
-                        help="Faktor kalibrasi untuk mengubah unit model menjadi meter; wajib jika --gt_lidar dipakai.")
+                        help="Faktor skala manual; tidak diperlukan pada --auto_align.")
+    parser.add_argument('--auto_align', action='store_true', help='Cari skala, rotasi, dan posisi otomatis (Sim(3)).')
+    parser.add_argument('--lidar_unit', choices=tuple(LIDAR_UNITS), default='m',
+                        help='Satuan koordinat file LiDAR; CLI lama menganggap meter.')
     parser.add_argument("--no_icp", action="store_true", help="Nonaktifkan registrasi ICP otomatis.")
     parser.add_argument("--psnr", type=float, default=None, help="Nilai PSNR hasil evaluasi visual (dB).")
     parser.add_argument("--ssim", type=float, default=None, help="Nilai SSIM (0-1).")
@@ -165,11 +199,15 @@ def main():
         logger.finalize(success=False)
         sys.exit(2)
 
-    if args.gt_lidar and args.scale_factor is None:
-        logger.log("--scale_factor wajib untuk evaluasi geometri agar skala model terkalibrasi ke meter.", level="error")
+    if args.auto_align and (args.no_icp or args.scale_factor is not None):
+        logger.log('--auto_align tidak boleh digabung --no_icp atau --scale_factor.', level='error')
         logger.finalize(success=False)
         sys.exit(2)
-    if args.gt_lidar and (not math.isfinite(args.scale_factor) or args.scale_factor <= 0):
+    if args.gt_lidar and not args.auto_align and args.scale_factor is None:
+        logger.log("Pilih --auto_align atau berikan --scale_factor hasil kalibrasi manual.", level="error")
+        logger.finalize(success=False)
+        sys.exit(2)
+    if args.gt_lidar and not args.auto_align and (not math.isfinite(args.scale_factor) or args.scale_factor <= 0):
         logger.log("--scale_factor harus berupa angka finite yang lebih besar dari 0.", level="error")
         logger.finalize(success=False)
         sys.exit(2)
@@ -180,18 +218,26 @@ def main():
     # 1. Evaluasi Geometri jika ada Ground Truth LiDAR
     if args.gt_lidar:
         logger.start_stage("Evaluasi_Geometri_LiDAR")
-        aligned_out = PROJECT_ROOT / "outputs" / "logs" / "evaluation_reports" / f"{args.statue_class}_{args.model_id}_{args.method}_aligned.ply"
+        aligned_out = (PROJECT_ROOT / 'outputs' / args.method.lower() / args.statue_class /
+                       args.model_id / 'geometry/aligned_reconstruction.ply')
         try:
-            logger.log('Evaluasi terhadap LiDAR tanpa ICP; model harus sudah selaras.' if args.no_icp
-                       else 'Menjalankan penyelarasan ICP otomatis terhadap LiDAR...')
+            logger.log('Mencari skala, rotasi dan posisi otomatis (Sim(3)); periksa overlay hasilnya.' if args.auto_align
+                       else 'Evaluasi terhadap LiDAR tanpa ICP; model harus sudah selaras.' if args.no_icp
+                       else 'Menjalankan penyelarasan ICP dengan skala manual...')
             geo_metrics = compute_chamfer_distance(
                 source_pcd_path=args.model_path,
                 target_pcd_path=args.gt_lidar,
                 scale_factor=args.scale_factor,
                 apply_icp=not args.no_icp,
+                auto_align=args.auto_align,
+                lidar_unit=args.lidar_unit,
                 save_aligned_path=str(aligned_out)
             )
             chamfer_cm = geo_metrics["chamfer_distance_cm"]
+            logger.log(f"Satuan LiDAR: {args.lidar_unit}; dikonversi ke meter sebelum evaluasi.")
+            if args.auto_align:
+                logger.log(f"Skala otomatis rekonstruksi ke meter: {geo_metrics['scale_factor_to_meters']:.10g}; "
+                           f"inisialisasi: {geo_metrics['alignment_initialization']}. Periksa overlay hasil.")
             logger.log(f"Model terselaraskan disimpan di: {aligned_out}")
             logger.log(f"Chamfer Distance: {chamfer_cm:.4f} cm")
             logger.log(f"Akurasi (< 2cm): {geo_metrics['accuracy_at_2cm_pct']}%, Kelengkapan (< 2cm): {geo_metrics['completeness_at_2cm_pct']}%")
@@ -204,7 +250,13 @@ def main():
             report = dict(geo_metrics, method=args.method, statue_class=args.statue_class, model_id=args.model_id,
                 model_path=str(model_path.resolve()), model_signature=file_signature(model_path),
                 gt_lidar_path=str(Path(args.gt_lidar).resolve()), gt_signature=file_signature(Path(args.gt_lidar)),
-                scale_factor_to_meters=args.scale_factor, apply_icp=not args.no_icp)
+                aligned_model_path=str(aligned_out),
+                aligned_lidar_path=str(aligned_out.with_name('ground_truth_meters.ply')),
+                scale_factor_to_meters=geo_metrics.get('scale_factor_to_meters', args.scale_factor),
+                apply_icp=not args.no_icp,
+                geometry_options=dict(lidar_unit=args.lidar_unit,
+                    alignment_mode='automatic' if args.auto_align else 'manual',
+                    **({} if args.auto_align else {'scale_factor': args.scale_factor})))
             geometry_dir = PROJECT_ROOT / 'outputs' / args.method.lower() / args.statue_class / args.model_id / 'geometry'
             geometry_dir.mkdir(parents=True, exist_ok=True)
             temporary = geometry_dir / 'metrics.json.tmp'
@@ -217,6 +269,8 @@ def main():
                 "model_path": args.model_path,
                 "gt_lidar_path": args.gt_lidar,
                 "scale_factor_to_meters": args.scale_factor,
+                "lidar_unit": args.lidar_unit,
+                "alignment_mode": 'automatic' if args.auto_align else 'manual',
             })
             logger.finalize(success=False)
             sys.exit(1)
@@ -233,7 +287,9 @@ def main():
     logger.set_parameters({
         "model_path": args.model_path,
         "gt_lidar_path": args.gt_lidar,
-        "scale_factor_to_meters": args.scale_factor,
+        "scale_factor_to_meters": geo_metrics.get('scale_factor_to_meters', args.scale_factor),
+        "lidar_unit": args.lidar_unit,
+        "alignment_mode": 'automatic' if args.auto_align else 'manual',
         "geometric_metrics_detail": geo_metrics
     })
 

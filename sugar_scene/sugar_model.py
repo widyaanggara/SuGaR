@@ -2391,7 +2391,8 @@ class SuGaR(nn.Module):
         checkpoint['state_dict'] = self.state_dict()
         for k, v in kwargs.items():
             checkpoint[k] = v
-        torch.save(checkpoint, path)        
+        from sugar_utils.training_recovery import atomic_torch_save
+        atomic_torch_save(checkpoint, path)
 
 
 def load_refined_model(refined_sugar_path, nerfmodel:GaussianSplattingWrapper, device=None):

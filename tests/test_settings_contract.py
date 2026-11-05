@@ -139,9 +139,23 @@ class SettingsContractTests(unittest.TestCase):
                  patch.object(module, 'has_colmap_model', return_value=True), \
                  patch.object(module, 'has_checkpoint', return_value=True), \
                  patch.object(module, 'training_matches', return_value=True):
+                refined.side_effect = [RuntimeError('interrupted after coarse and mesh'), str(artifacts[2])]
+                with self.assertRaisesRegex(RuntimeError, 'interrupted after coarse'):
+                    module.train_sugar_pipeline(temporary, str(baseline), str(output),
+                        regularization_type='density', refinement_time='medium', n_vertices=200000,
+                        gaussians_per_triangle=6, gpu=2, image_downscale=4, image_max_size=1280)
                 module.train_sugar_pipeline(temporary, str(baseline), str(output),
                     regularization_type='density', refinement_time='medium', n_vertices=200000,
                     gaussians_per_triangle=6, gpu=2, image_downscale=4, image_max_size=1280)
+                self.assertEqual(coarse.call_count, 1, 'Recovery must reuse completed coarse optimization')
+                self.assertEqual(mesh.call_count, 1, 'Recovery must reuse the completed mesh')
+                self.assertEqual(refined.call_count, 2)
+                self.assertEqual(textured.call_count, 1)
+                module.train_sugar_pipeline(temporary, str(baseline), str(output),
+                    regularization_type='density', refinement_time='medium', n_vertices=200000,
+                    gaussians_per_triangle=6, gpu=2, image_downscale=4, image_max_size=1280)
+                self.assertEqual(refined.call_count, 2, 'Complete refinement must not run again')
+                self.assertEqual(textured.call_count, 1, 'Complete textured export must not run again')
                 self.assertEqual(os.environ['SUGAR_IMAGE_DOWNSCALE'], '4')
                 self.assertEqual(os.environ['SUGAR_IMAGE_MAX_SIZE'], '1280')
                 self.assertEqual(os.environ['CUDA_VISIBLE_DEVICES'], '2')

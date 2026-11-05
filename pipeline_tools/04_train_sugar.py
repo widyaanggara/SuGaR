@@ -14,6 +14,8 @@ from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.dataset_registry import has_checkpoint, has_colmap_model, file_signature
 from pipeline_tools.run_settings import (add_resolution_arguments, resolution_settings, training_matches,
     sugar_settings, research_presets)
+from pipeline_tools.recovery_state import (configure_recovery, scene_identity, code_identity,
+                                          StageJournal, fingerprint)
 
 
 def train_sugar_pipeline(scene_path: str,
@@ -28,7 +30,8 @@ def train_sugar_pipeline(scene_path: str,
                          white_background: bool = False,
                          logger: ThesisLogger = None,
                          image_downscale: int = 1,
-                         image_max_size: int = 1600):
+                         image_max_size: int = 1600,
+                         resume: bool = True):
     """
     Menjalankan pipeline SuGaR lengkap secara teratur dan aman dari masalah memori/path.
     
@@ -93,6 +96,25 @@ def train_sugar_pipeline(scene_path: str,
     else:
         refinement_iterations = 2000
 
+    identity = configure_recovery(output_dir / 'recovery/identity.json', {
+        'scene': scene_identity(scene_path),
+        'baseline': file_signature(Path(checkpoint_3dgs) / 'point_cloud/iteration_7000/point_cloud.ply'),
+        'cameras': code_identity(Path(checkpoint_3dgs), ['cameras.json']),
+        'torch': str(getattr(torch, '__version__', 'unknown')),
+        'regularization': regularization_type, 'iterations': refinement_iterations,
+        'vertices': n_vertices, 'gaussians_per_triangle': gaussians_per_triangle,
+        'image_downscale': image_downscale, 'image_max_size': image_max_size,
+        'white_background': white_background,
+        'code': code_identity(PROJECT_ROOT, ['sugar_trainers/coarse_density.py',
+            'sugar_trainers/coarse_density_and_dn_consistency.py', 'sugar_trainers/coarse_sdf.py',
+            'sugar_trainers/refine.py', 'sugar_scene/sugar_model.py', 'sugar_scene/sugar_optimizer.py',
+            'sugar_utils/training_recovery.py', 'sugar_extractors/coarse_mesh.py', 'sugar_extractors/refined_mesh.py'])}, resume)
+    journal = StageJournal(output_dir / 'recovery/stages' / fingerprint(identity), identity,
+                           enabled=resume, log=logger.log if logger else print)
+    def recovery_options(stage, inputs):
+        return {'directory': str(output_dir / 'recovery/checkpoints' / stage),
+                'identity': {'pipeline': identity, 'stage': stage, 'inputs': inputs}, 'resume': resume}
+
     if logger:
         logger.log(f"Memulai Pipeline SuGaR untuk Scene: {scene_path}")
         logger.log(f"Regularisasi: {regularization_type}, Refinement: {refinement_iterations}, "
@@ -117,16 +139,20 @@ def train_sugar_pipeline(scene_path: str,
         'normal_factor': 0.2,
         'gpu': gpu,
         'white_background': white_background,
+        'recovery': recovery_options('coarse', {}),
     })
 
-    if regularization_type == 'sdf':
-        coarse_sugar_path = coarse_training_with_sdf_regularization(coarse_args)
-    elif regularization_type == 'density':
-        coarse_sugar_path = coarse_training_with_density_regularization(coarse_args)
-    elif regularization_type == 'dn_consistency':
-        coarse_sugar_path = coarse_training_with_density_regularization_and_dn_consistency(coarse_args)
-    else:
-        raise ValueError(f"Unknown regularization type: {regularization_type}")
+    coarse_sugar_path = journal.get('coarse', {})
+    if coarse_sugar_path is None:
+        if regularization_type == 'sdf':
+            coarse_sugar_path = coarse_training_with_sdf_regularization(coarse_args)
+        elif regularization_type == 'density':
+            coarse_sugar_path = coarse_training_with_density_regularization(coarse_args)
+        elif regularization_type == 'dn_consistency':
+            coarse_sugar_path = coarse_training_with_density_regularization_and_dn_consistency(coarse_args)
+        else:
+            raise ValueError(f"Unknown regularization type: {regularization_type}")
+        journal.complete('coarse', {}, coarse_sugar_path)
 
     if logger:
         logger.end_stage("SuGaR_01_Coarse_Optimization")
@@ -156,7 +182,11 @@ def train_sugar_pipeline(scene_path: str,
         'use_marching_cubes': False,
         'use_vanilla_3dgs': False,
     })
-    coarse_mesh_path = extract_mesh_from_coarse_sugar(coarse_mesh_args)[0]
+    mesh_inputs = {'coarse': file_signature(Path(coarse_sugar_path))}
+    coarse_mesh_path = journal.get('mesh', mesh_inputs)
+    if coarse_mesh_path is None:
+        coarse_mesh_path = extract_mesh_from_coarse_sugar(coarse_mesh_args)[0]
+        journal.complete('mesh', mesh_inputs, coarse_mesh_path)
 
     if logger:
         logger.end_stage("SuGaR_02_Mesh_Extraction")
@@ -184,8 +214,13 @@ def train_sugar_pipeline(scene_path: str,
         'eval': True,
         'gpu': gpu,
         'white_background': white_background,
+        'recovery': recovery_options('refine', {'mesh': file_signature(Path(coarse_mesh_path))}),
     })
-    refined_sugar_path = refined_training(refined_args)
+    refine_inputs = {'mesh': file_signature(Path(coarse_mesh_path))}
+    refined_sugar_path = journal.get('refine', refine_inputs)
+    if refined_sugar_path is None:
+        refined_sugar_path = refined_training(refined_args)
+        journal.complete('refine', refine_inputs, refined_sugar_path)
 
     if logger:
         logger.end_stage("SuGaR_03_Refinement")
@@ -214,7 +249,11 @@ def train_sugar_pipeline(scene_path: str,
             'postprocess_density_threshold': 0.1,
             'postprocess_iterations': 5,
         })
-        refined_mesh_path = extract_mesh_and_texture_from_refined_sugar(refined_mesh_args)
+        texture_inputs = {'refined': file_signature(Path(refined_sugar_path)), **refine_inputs}
+        refined_mesh_path = journal.get('texture', texture_inputs)
+        if refined_mesh_path is None:
+            refined_mesh_path = extract_mesh_and_texture_from_refined_sugar(refined_mesh_args)
+            journal.complete('texture', texture_inputs, refined_mesh_path)
 
         if logger:
             logger.end_stage("SuGaR_04_Textured_Mesh_Export")
@@ -245,6 +284,7 @@ def main():
     parser = argparse.ArgumentParser(description="Pipeline SuGaR untuk satu model dataset.")
     parser.add_argument("--scene_path", "-s", type=str, required=True, help="Folder dataset (misal: datasets/Dewa/model_01).")
     parser.add_argument("--checkpoint_3dgs", "-c", type=str, required=True, help="Folder output 3DGS yang memuat checkpoint 7000.")
+    parser.add_argument('--no_resume', action='store_true', help='Mulai tahap SuGaR baru tanpa memulihkan checkpoint.')
     parser.add_argument("--output_dir", "-o", type=str, default=None, help="Folder tujuan (default: outputs/sugar/<Kelas>/<Model_ID>).")
     parser.add_argument("--statue_class", type=str, default="Dewa", help="Nama kelas patung.")
     parser.add_argument("--model_id", type=str, default="model_01", help="ID model patung.")
@@ -284,6 +324,7 @@ def main():
             train_sugar_pipeline(
                 scene_path=args.scene_path,
                 checkpoint_3dgs=args.checkpoint_3dgs,
+                resume=not args.no_resume,
                 output_base_dir=str(output_dir),
                 regularization_type=args.regularization,
                 refinement_time=args.refinement_time,

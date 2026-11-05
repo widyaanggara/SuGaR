@@ -10,6 +10,12 @@ import uuid
 from pathlib import Path
 
 
+def pending_order(job):
+    """Shared execution/display priority: recovery first, FIFO within a group."""
+    return (0 if job.get('recovery') else 1,
+            job.get('recovery_requested_at', job.get('created_at', 0)))
+
+
 def process_options():
     return {"start_new_session": True} if os.name != "nt" else {
         "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -96,6 +102,36 @@ class JobQueue:
             self.condition.notify_all()
         return added, duplicates
 
+    def retry(self, job_id):
+        """Prioritize recovery without interrupting the active process tree."""
+        with self.condition:
+            original = next((job for job in self.jobs if job['id'] == job_id), None)
+            if original is None or original['status'] not in ('INTERRUPTED', 'FAILED', 'CANCELLED'):
+                raise ValueError('Pilih pekerjaan yang terputus, gagal, atau dibatalkan.')
+            def key(job):
+                return (job['action'], job['class_name'], job['model_id'],
+                        job.get('evaluation_method', '') if job['action'].startswith('evaluate') else '')
+            pending = next((job for job in self.jobs if key(job) == key(original)
+                            and job['status'] in ('QUEUED', 'RUNNING', 'STOPPING')), None)
+            if pending and pending['status'] != 'QUEUED':
+                return {'job_id': pending['id'], 'already_running': True, 'promoted': False}
+            ignored = {'id', 'status', 'created_at', 'started_at', 'finished_at', 'error', 'returncode',
+                       'recovery', 'recovery_requested_at', 'retry_of', 'resume'}
+            def configuration(job):
+                return {k: v for k, v in job.items() if k not in ignored}
+            if pending and configuration(pending) != configuration(original):
+                raise ValueError('Sudah ada antrean model ini dengan pengaturan berbeda. Batalkan antrean itu sebelum memulihkan pekerjaan lama.')
+            now = time.time()
+            if pending is None:
+                pending = dict(original, id=uuid.uuid4().hex, status='QUEUED', created_at=now,
+                               started_at=None, finished_at=None, error=None, returncode=None)
+                self.jobs.append(pending)
+            pending.update(resume=True, recovery=True, retry_of=job_id,
+                           recovery_requested_at=pending.get('recovery_requested_at', now))
+            self._save()
+            self.condition.notify_all()
+            return {'job_id': pending['id'], 'already_running': False, 'promoted': True}
+
     def _log(self, job, line):
         with self.condition:
             self.buffers.setdefault(job["id"], collections.deque(maxlen=300)).append(line)
@@ -114,8 +150,15 @@ class JobQueue:
                     with path.open(encoding="utf-8", errors="replace") as stream:
                         logs = list(collections.deque(stream, maxlen=300))
             counts = dict(collections.Counter(j["status"] for j in self.jobs))
+            running = [j for j in self.jobs if j['status'] in ('RUNNING', 'STOPPING')]
+            pending = sorted((j for j in self.jobs if j['status'] == 'QUEUED'), key=pending_order)
+            positions = {j['id']: index + 1 for index, j in enumerate(running + pending)}
+            recent = self.jobs[-200:]
+            recent_ids = {j['id'] for j in recent}
+            # Never hide an active/prioritized job behind the history limit.
+            visible = [j for j in running + pending if j['id'] not in recent_ids] + recent
             return {"paused": self.paused, "counts": counts,
-                    "jobs": [dict(j) for j in self.jobs[-200:]],
+                    "jobs": [dict(j, queue_position=positions.get(j['id'])) for j in visible],
                     "is_running": active is not None,
                     "action": latest["action"] if latest else None,
                     "target": f"{latest['class_name']}/{latest['model_id']}" if latest else None,
@@ -183,7 +226,7 @@ class JobQueue:
                     j["status"] == "QUEUED" for j in self.jobs)))
                 if self.closing:
                     return
-                job = next(j for j in self.jobs if j["status"] == "QUEUED")
+                job = min((j for j in self.jobs if j['status'] == 'QUEUED'), key=pending_order)
                 job.update(status="RUNNING", started_at=time.time())
                 self.active_id = job["id"]
                 self.cancelling = False

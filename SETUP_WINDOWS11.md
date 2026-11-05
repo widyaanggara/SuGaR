@@ -209,7 +209,7 @@ python -u pipeline_tools/batch_run_all.py \
   --class_name Dewa --model_id model_01 --gpu 0 --refinement_time short
 ```
 
-Atau gunakan tombol **Antrekan Pipeline Lengkap** pada kartu `Dewa/model_01` di dashboard (bagian 8). Pilih salah satu pengendali saat pengujian. Pastikan satu model selesai sampai ekspor OBJ dan evaluasi sebelum mengantrekan seluruh 18 model.
+Atau klik **Antrekan model ini** pada kartu `Dewa/model_01`, pilih **Keseluruhan proses**, lalu tambahkan ke antrean di popup dashboard (bagian 8). Pilih salah satu pengendali saat pengujian. Pastikan satu model selesai sampai ekspor OBJ dan evaluasi sebelum mengantrekan seluruh 18 model.
 
 Perintah terpisah per tahap berikut tersedia untuk penelusuran masalah:
 
@@ -269,4 +269,4 @@ Buka `http://localhost:8080` di browser Windows. Hentikan server dengan `Ctrl+C`
 
 Ringkasan evaluasi tersimpan di `outputs/logs/evaluation_reports/summary_comparison.csv` dan `summary_comparison.md`.
 
-Dashboard sekarang mendukung 18 model dan antrean persisten satu worker. Pipeline lengkap menjalankan ekstraksi opsional, COLMAP, 3DGS, SuGaR, serta evaluasi PSNR/SSIM/LPIPS kedua metode. Evaluasi LiDAR tetap opsional dan memerlukan skala terkalibrasi. Ikuti [RUN_SERVER.md](RUN_SERVER.md) untuk menjalankan semua model dan memahami jeda/lanjut/stop.
+Dashboard mendukung 18 model dan antrean persisten satu worker. Klik **Antrekan Model** di kanan atas untuk memilih semua kelas/model atau satu target, lalu pilih pipeline lengkap, evaluasi visual, atau evaluasi geometri. Pada **Pipeline lengkap**, pilih **Mulai pipeline → Dari hasil COLMAP yang sudah ada** untuk otomatis melanjutkan 3DGS → SuGaR → evaluasi kedua metode tanpa menjalankan COLMAP lagi. Siapkan `images/` hasil undistorsi dan `sparse/0` yang sesuai; target belum lengkap dilewati. Pada satu model tersedia pula tahap COLMAP/3DGS/SuGaR. Geometri memakai hasil yang sudah ada tanpa training ulang; pilih satuan LiDAR per model dan penyelarasan otomatis. Tidak perlu input tinggi atau faktor skala manual pada mode otomatis. Periksa overlay hasil sebelum melaporkan skor. Lihat [RUN_SERVER.md](RUN_SERVER.md) dan [GEOMETRY_EVALUATION.md](GEOMETRY_EVALUATION.md).

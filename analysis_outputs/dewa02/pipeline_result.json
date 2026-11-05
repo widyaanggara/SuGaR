@@ -1,0 +1,31 @@
+{
+  "coarse_checkpoint": "coarse/sugarcoarse_3Dgs7000_densityestim02_sdfnorm02/15000.pt",
+  "coarse_mesh": "mesh/sugarmesh_15000.pt_level03_decim1000000.ply",
+  "refined_checkpoint": "refined/sugarfine_15000_normalconsistency01_gaussperface1/15000.pt",
+  "textured_mesh": "textured_mesh/sugarfine_15000_normalconsistency01_gaussperface1.obj",
+  "regularization": "dn_consistency",
+  "refinement_iterations": 15000,
+  "decimation_target": 1000000,
+  "gaussians_per_triangle": 1,
+  "white_background": false,
+  "scene_path": "/home/anggara/SuGaR/datasets/Dewa/model_02",
+  "image_downscale": 1,
+  "image_max_size": 1600,
+  "upstream_reference": {
+    "repository": "https://github.com/Anttwo/SuGaR",
+    "readme": "https://github.com/Anttwo/SuGaR#quick-start",
+    "training_code": "https://github.com/Anttwo/SuGaR/blob/main/train.py",
+    "verified_on": "2026-10-28",
+    "scope": "Konfigurasi SuGaR saja. Resolusi foto dan COLMAP adalah parameter protokol penelitian ini, bukan preset resmi RTX 4090.",
+    "local_code_sha256": {
+      "train.py": "2570e30adcaf2dc7a5ddd805c01a550c09ab1c460cfa34541fedfb1bbb4fad3e",
+      "sugar_extractors/coarse_mesh.py": "8134ef179d6d551a19e64a245387a0a22d7951c2f449104e1401d71171eb805c",
+      "sugar_trainers/refine.py": "cec07e72bcbcf45e3b0d18e1f9d66bd128ce1092f870c78f2a0faaff51aad730",
+      "pipeline_tools/04_train_sugar.py": "eb7fb8328006c8fb87af51e0688cee4ef4331618bb49b11f84cae16ffebe1f0f"
+    }
+  },
+  "baseline_signature": {
+    "size": 464535540,
+    "mtime_ns": 1793643749023274723
+  }
+}

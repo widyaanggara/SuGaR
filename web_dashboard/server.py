@@ -1,8 +1,8 @@
 """Local dashboard and persistent, single-worker pipeline queue."""
 import argparse
 import csv
+import io
 import json
-import math
 import mimetypes
 import subprocess
 import sys
@@ -20,10 +20,17 @@ from web_dashboard.job_queue import JobQueue
 from pipeline_tools.run_settings import (resolution_settings, colmap_settings, colmap_arguments,
     sugar_settings, sugar_arguments, research_presets)
 from pipeline_tools.colmap_capabilities import inspect_colmap
+from pipeline_tools.model_names import read_model_names, model_display_name, save_model_name
+from pipeline_tools.geometry_config import (read_geometry_scales, save_geometry_scales, positive_scale,
+    geometry_model_path, geometry_source_ready, geometry_result_current, nonempty_file,
+    read_geometry_settings, save_geometry_settings, geometry_options)
 
 
 def get_project_status(root=PROJECT_ROOT):
     root = Path(root)
+    names = read_model_names(root)
+    scales = read_geometry_scales(root)
+    geometry_settings = read_geometry_settings(root)
     result = {}
     for cls, mdl in scene_pairs():
         scene = root / "datasets" / cls / mdl
@@ -35,10 +42,21 @@ def get_project_status(root=PROJECT_ROOT):
         dgs_done = has_checkpoint(dgs, 30000)
         sugar_done = has_sugar_result(sugar)
         evaluated = all(has_evaluation(out) for out in (dgs, sugar))
+        scale = scales.get(cls, {}).get(mdl)
+        options = geometry_settings.get(cls, {}).get(mdl)
+        geometry_methods = {method: geometry_result_current(root, cls, mdl, method, scale, options)
+                            for method in ('3DGS', 'SuGaR')}
         result.setdefault(cls, {})[mdl] = {
+            "display_name": model_display_name(cls, mdl, names),
+            "custom_name": names.get(cls, {}).get(mdl, ""),
             "input_count": input_count, "images_count": input_count or image_count,
             "undistorted_count": image_count, "has_video": has_video,
-            "has_gt_lidar": (scene / "ground_truth" / "lidar.ply").is_file(),
+            "has_gt_lidar": nonempty_file(scene / "ground_truth/lidar.ply"),
+            "geometry_scale_factor": scale,
+            "geometry_settings": options,
+            "geometry_sources": {method: geometry_source_ready(root, cls, mdl, method)
+                                 for method in ('3DGS', 'SuGaR')},
+            "geometry_methods": geometry_methods, "geometry_evaluated": all(geometry_methods.values()),
             "colmap_done": has_colmap_model(scene), "3dgs_7k": has_checkpoint(dgs, 7000),
             "3dgs_30k": dgs_done, "sugar_mesh": any((sugar / "mesh").glob("*.ply")),
             "sugar_obj": sugar_done, "evaluated": evaluated,
@@ -54,8 +72,12 @@ def get_metrics_table(root=PROJECT_ROOT):
     path = Path(root) / "outputs/logs/evaluation_reports/summary_comparison.csv"
     if not path.is_file():
         return []
+    names = read_model_names(root)
     with path.open(encoding="utf-8", newline="") as stream:
-        return list(csv.DictReader(stream))
+        rows = list(csv.DictReader(stream))
+    for row in rows:
+        row['Nama Model'] = model_display_name(row.get('Kelas', ''), row.get('Model ID', ''), names)
+    return rows
 
 
 def get_preview_images(cls, mdl, root=PROJECT_ROOT):
@@ -85,6 +107,8 @@ def build_command(job, root=PROJECT_ROOT):
                 *sugar_arguments(job)]
         if not job.get("resume", True):
             args.append("--no_resume")
+        if job.get('pipeline_start') == 'existing_colmap':
+            args.append('--skip_colmap')
     elif action == "extract_frames":
         videos = media_files(scene / "raw_video", VIDEO_EXTENSIONS)
         if not videos:
@@ -104,14 +128,18 @@ def build_command(job, root=PROJECT_ROOT):
         script, args = "06_evaluate_rendering.py", [*common, *gpu, "--method", job["evaluation_method"]]
     elif action == "evaluate":
         method = job["evaluation_method"]
-        if method == "3DGS":
-            model = root / "outputs/3dgs" / cls / mdl / "point_cloud/iteration_30000/point_cloud.ply"
-        else:
-            output = root / "outputs/sugar" / cls / mdl
-            manifest = json.loads((output / "pipeline_result.json").read_text(encoding="utf-8"))
-            model = output / manifest["textured_mesh"]
+        model = geometry_model_path(root, cls, mdl, method)
         script, args = "05_evaluate_comparison.py", [*common, "--method", method, "-p", str(model),
-            "-g", str(scene / "ground_truth/lidar.ply"), "--scale_factor", str(job["scale_factor"])]
+            "-g", str(scene / "ground_truth/lidar.ply")]
+        options = job.get('geometry_options')
+        if options:
+            args.extend(['--lidar_unit', options['lidar_unit']])
+        if options and options['alignment_mode'] == 'automatic':
+            args.append('--auto_align')
+        else:
+            args.extend(['--scale_factor', str(job['scale_factor'])])
+        if job.get('apply_icp', True) is False:
+            args.append('--no_icp')
     else:
         raise ValueError("Tahap pipeline tidak dikenal.")
     if action in {'full_pipeline', 'colmap'}:
@@ -119,6 +147,8 @@ def build_command(job, root=PROJECT_ROOT):
         args.extend(colmap_arguments(job))
     if action in {'full_pipeline', '3dgs', 'sugar', 'evaluate_visual'}:
         args.extend(image_args)
+    if action in {'3dgs', 'sugar'} and job.get('resume', True) is False:
+        args.append('--no_resume')
     return [sys.executable, "-u", str(root / "pipeline_tools" / script), *args]
 
 
@@ -128,10 +158,15 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     action = data.get("action", "full_pipeline")
     if action not in {"full_pipeline", "extract_frames", "colmap", "3dgs", "sugar", "evaluate", "evaluate_visual"}:
         raise ValueError("Tahap pipeline tidak dikenal.")
+    pipeline_start = data.get('pipeline_start', 'auto')
+    if not isinstance(pipeline_start, str) or pipeline_start not in ('auto', 'existing_colmap'):
+        raise ValueError('Awal pipeline harus auto atau existing_colmap.')
+    if pipeline_start != 'auto' and action != 'full_pipeline':
+        raise ValueError('Awal pipeline hanya berlaku untuk Pipeline lengkap.')
     cls, mdl = data.get("class_name", ""), data.get("model_id", "")
     if not isinstance(cls, str) or not isinstance(mdl, str):
         raise ValueError("Kelas dan model harus berupa teks.")
-    if action != "full_pipeline" and (not cls or not mdl):
+    if action not in {"full_pipeline", "evaluate_visual", "evaluate"} and (not cls or not mdl):
         raise ValueError("Pilih satu kelas dan satu model untuk tahap ini.")
     pairs = scene_pairs(cls, mdl)
     settings = {**resolution_settings(data), **colmap_settings(data), **sugar_settings(data)}
@@ -153,26 +188,69 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     if refinement not in {"short", "medium", "long"}:
         raise ValueError("Refinement harus short, medium, atau long.")
     method = data.get("evaluation_method", "SuGaR")
-    if method not in {"3DGS", "SuGaR"}:
-        raise ValueError("Metode evaluasi harus 3DGS atau SuGaR.")
-    scale = None
+    allowed_methods = {'3DGS', 'SuGaR', 'both'} if action in {'evaluate_visual', 'evaluate'} else {'3DGS', 'SuGaR'}
+    if not isinstance(method, str) or method not in allowed_methods:
+        raise ValueError("Metode evaluasi harus 3DGS, SuGaR, atau keduanya untuk evaluasi.")
+    methods = ('3DGS', 'SuGaR') if method == 'both' else (method,)
+    apply_icp = data.get('apply_icp', True)
+    if not isinstance(apply_icp, bool):
+        raise ValueError('Pilihan ICP harus berupa boolean.')
+    require_geometry_settings = data.get('geometry_settings_required', False)
+    if not isinstance(require_geometry_settings, bool):
+        raise ValueError('Pilihan pengaturan geometri wajib harus berupa boolean.')
+    explicit_scale, scales, geometry_settings = None, {}, {}
     if action == "evaluate":
-        try:
-            scale = float(data.get("scale_factor"))
-        except (TypeError, ValueError):
-            raise ValueError("Masukkan faktor kalibrasi skala numerik.")
-        if not math.isfinite(scale) or scale <= 0:
-            raise ValueError("Faktor skala harus finite dan > 0.")
+        if 'scale_factor' in data:
+            if len(pairs) != 1:
+                raise ValueError('Evaluasi semua model harus memakai skala kalibrasi per model, bukan satu skala bersama.')
+            explicit_scale = positive_scale(data['scale_factor'])
+        scales = read_geometry_scales(root)
+        if require_geometry_settings:
+            scales = {}
+        geometry_settings = read_geometry_settings(root)
+        if 'geometry_options' in data:
+            selected_options = geometry_options(data['geometry_options'])
+            geometry_settings = {cls: {mdl: selected_options for c, mdl in pairs if c == cls}
+                                 for cls, _ in pairs}
     jobs, skipped = [], []
     for cls, mdl in pairs:
         if action == "full_pipeline" and not has_data(Path(root) / "datasets" / cls / mdl):
             skipped.append(f"{cls}/{mdl}")
             continue
-        jobs.append(dict(action=action, class_name=cls, model_id=mdl, gpu=gpu,
-                         resume=data.get("resume", True) is True,
-                         evaluation_method=method, scale_factor=scale,
-                         sugar_configuration_source=source_preset,
-                         upstream_reference=references['source'], **settings))
+        if action == 'full_pipeline' and pipeline_start == 'existing_colmap' and not has_colmap_model(Path(root) / 'datasets' / cls / mdl):
+            skipped.append(f'{cls}/{mdl}: images/ hasil undistorsi dan sparse/0 COLMAP belum lengkap')
+            continue
+        scale = explicit_scale if explicit_scale is not None else scales.get(cls, {}).get(mdl)
+        options = None if explicit_scale is not None else geometry_settings.get(cls, {}).get(mdl)
+        if options and options['alignment_mode'] == 'manual':
+            scale = options['scale_factor']
+        if options and options['alignment_mode'] == 'automatic' and not apply_icp:
+            raise ValueError('Penyelarasan otomatis tidak dapat digabungkan dengan --no_icp.')
+        for current_method in methods:
+            reason = ''
+            if action == 'evaluate':
+                if not nonempty_file(Path(root) / 'datasets' / cls / mdl / 'ground_truth/lidar.ply'):
+                    reason = 'ground_truth/lidar.ply belum tersedia'
+                elif scale is None and options is None:
+                    reason = 'pilih satuan LiDAR dan penyelarasan otomatis, atau isi kalibrasi manual'
+                elif not geometry_source_ready(root, cls, mdl, current_method):
+                    reason = f'hasil rekonstruksi {current_method} belum tersedia'
+            elif action == 'evaluate_visual':
+                baseline = Path(root) / 'outputs/3dgs' / cls / mdl
+                ready = (has_checkpoint(baseline, 30000) if current_method == '3DGS' else
+                         has_checkpoint(baseline, 7000) and has_sugar_result(Path(root) / 'outputs/sugar' / cls / mdl))
+                if not ready:
+                    reason = f'checkpoint evaluasi {current_method} belum lengkap'
+            if reason:
+                skipped.append(f'{cls}/{mdl} ({current_method}): {reason}')
+                continue
+            jobs.append(dict(action=action, class_name=cls, model_id=mdl, gpu=gpu,
+                             pipeline_start=pipeline_start,
+                             resume=data.get("resume", True) is True,
+                             evaluation_method=current_method, scale_factor=scale, apply_icp=apply_icp,
+                             geometry_options=options,
+                             sugar_configuration_source=source_preset,
+                             upstream_reference=references['source'], **settings))
     return jobs, skipped
 
 
@@ -203,7 +281,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/metrics":
                 self.send_json(get_metrics_table(self.root))
             elif path == "/api/metrics.csv":
-                self.send_file(self.root / "outputs/logs/evaluation_reports/summary_comparison.csv", "text/csv; charset=utf-8", download=True)
+                self.send_metrics_csv()
             elif path in ("/api/logs", "/api/queue"):
                 self.send_json(self.queue.snapshot())
             elif path.startswith('/api/jobs/') and path.endswith('/logs'):
@@ -227,6 +305,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
         except ValueError as exc:
             self.send_json({"error": str(exc)}, 400)
+        except OSError:
+            self.send_json({"error": "File dashboard tidak dapat dibaca. Periksa izin dan ruang penyimpanan server."}, 500)
 
     def do_POST(self):
         path = urlparse(self.path).path
@@ -237,16 +317,30 @@ class DashboardHandler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if not isinstance(data, dict):
                 raise ValueError("Body harus berupa objek JSON.")
-            if path == "/api/run":
+            if path == '/api/geometry-scales':
+                self.send_json({'scales': save_geometry_scales(data.get('scales'), self.root)})
+            elif path == '/api/geometry-settings':
+                self.send_json({'settings': save_geometry_settings(data.get('settings'), self.root)})
+            elif path == "/api/model-name":
+                result = save_model_name(data.get('class_name'), data.get('model_id'),
+                                         data.get('display_name'), self.root)
+                self.send_json(result)
+            elif path == "/api/run":
                 jobs, skipped = prepare_jobs(data, self.root)
-                if not jobs:
+                if not jobs and data.get('action', 'full_pipeline') == 'full_pipeline':
+                    if data.get('pipeline_start') == 'existing_colmap':
+                        raise ValueError('Belum ada target dengan hasil COLMAP lengkap. Siapkan images/ dan sparse/0 pada model yang dipilih.')
                     raise ValueError("Belum ada foto/video pada dataset yang dipilih. Isi input/ atau raw_video/ terlebih dahulu.")
                 added, duplicates = self.queue.enqueue(jobs)
                 self.send_json({"message": f"{len(added)} pekerjaan ditambahkan ke antrean.",
-                    "added": added, "duplicates": duplicates, "skipped_empty": skipped}, 202)
+                    "added": added, "duplicates": duplicates, "skipped_empty": skipped, "skipped": skipped}, 202)
             elif path == "/api/stop":
                 self.queue.stop()
                 self.send_json({"message": "Proses dihentikan; antrean dijeda. Klik Lanjutkan untuk pekerjaan berikutnya."})
+            elif path == '/api/queue/retry':
+                if not isinstance(data.get('job_id'), str):
+                    raise ValueError('ID pekerjaan wajib diisi.')
+                self.send_json(self.queue.retry(data['job_id']), 202)
             elif path in ("/api/queue/pause", "/api/queue/resume"):
                 self.queue.set_paused(path.endswith("pause"))
                 self.send_json({"message": "Antrean dijeda setelah pekerjaan aktif selesai." if path.endswith("pause") else "Antrean dilanjutkan."})
@@ -259,6 +353,33 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
         except (ValueError, TypeError, UnicodeError) as exc:
             self.send_json({"error": str(exc)}, 400)
+        except OSError:
+            self.send_json({"error": "Perubahan tidak dapat disimpan. Periksa izin dan ruang penyimpanan server."}, 500)
+
+    def send_metrics_csv(self):
+        path = self.root / 'outputs/logs/evaluation_reports/summary_comparison.csv'
+        if not path.is_file():
+            self.send_error(404)
+            return
+        with path.open(encoding='utf-8', newline='') as stream:
+            fields = list(csv.DictReader(stream).fieldnames or [])
+        if 'Nama Model' not in fields:
+            fields.append('Nama Model')
+        text = io.StringIO(newline='')
+        writer = csv.DictWriter(text, fieldnames=fields)
+        writer.writeheader()
+        for row in get_metrics_table(self.root):
+            if row['Nama Model'].startswith(('=', '+', '-', '@')):
+                row['Nama Model'] = "'" + row['Nama Model']
+            writer.writerow(row)
+        payload = text.getvalue().encode('utf-8-sig')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/csv; charset=utf-8')
+        self.send_header('Content-Disposition', 'attachment; filename="summary_comparison.csv"')
+        self.send_header('Content-Length', str(len(payload)))
+        self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        self.wfile.write(payload)
 
     def send_file(self, path, mime=None, download=False):
         if not path.is_file():

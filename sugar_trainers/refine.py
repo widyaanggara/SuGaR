@@ -1,4 +1,5 @@
 import os
+from sugar_utils.training_recovery import SugarRecovery
 import numpy as np
 import torch
 import open3d as o3d
@@ -455,6 +456,9 @@ def refined_training(args):
     cameras_spatial_extent = sugar.get_cameras_spatial_extent()
     
     
+    recovery = SugarRecovery(args)
+    recovery.restore_model(sugar)
+
     # ====================Initialize optimizer====================
     if use_custom_bbox:
         bbox_radius = ((torch.tensor(fg_bbox_max) - torch.tensor(fg_bbox_min)).norm(dim=-1) / 2.).item()
@@ -519,16 +523,29 @@ def refined_training(args):
     if initialize_from_trained_3dgs:
         iteration = 7000 - 1  # TODO: Maybe should try without this?
     
+    recovery.restore_training(optimizer, gaussian_densifier if 'gaussian_densifier' in locals() else None)
+    if recovery.state:
+        iteration = recovery.iteration
+        if iteration > num_iterations:
+            raise ValueError('Checkpoint melewati jumlah iterasi yang diminta.')
+        training_state = recovery.state['training']
+        epoch = training_state['epoch']
+        train_losses = training_state['train_losses']
+        current_sh_levels = training_state['current_sh_levels']
+        if training_state['current_resolution_factor'] != current_resolution_factor:
+            raise ValueError('Resolution warmup checkpoint tidak cocok.')
+        loss = torch.tensor(training_state['loss'], device=sugar.device)
+
     for batch in range(9_999_999):
         if iteration >= num_iterations:
             break
         
         # Shuffle images
-        shuffled_idx = torch.randperm(len(nerfmodel.training_cameras))
+        shuffled_idx, recovery_offset = recovery.camera_order(len(nerfmodel.training_cameras))
         train_num_images = len(shuffled_idx)
         
         # We iterate on images
-        for i in range(0, train_num_images, train_num_images_per_batch):
+        for i in range(recovery_offset, train_num_images, train_num_images_per_batch):
             iteration += 1
             
             # Update learning rates
@@ -847,14 +864,12 @@ def refined_training(args):
                 #     rm.save_model(os.path.join(rc_checkpoint_path, f'rm_{iteration}.pt'))
                 CONSOLE.print("Model saved.")
             
-            if iteration >= num_iterations:
-                break
             
-            if do_sh_warmup and (iteration > 0) and (current_sh_levels < sh_levels) and (iteration % sh_warmup_every == 0):
+            if iteration < num_iterations and do_sh_warmup and (iteration > 0) and (current_sh_levels < sh_levels) and (iteration % sh_warmup_every == 0):
                 current_sh_levels += 1
                 CONSOLE.print("Increasing number of spherical harmonics levels to", current_sh_levels)
             
-            if do_resolution_warmup and (iteration > 0) and (current_resolution_factor > 1) and (iteration % resolution_warmup_every == 0):
+            if iteration < num_iterations and do_resolution_warmup and (iteration > 0) and (current_resolution_factor > 1) and (iteration % resolution_warmup_every == 0):
                 current_resolution_factor /= 2.
                 nerfmodel.downscale_output_resolution(1/2)
                 CONSOLE.print(f'\nCamera resolution scaled to '
@@ -864,6 +879,16 @@ def refined_training(args):
                 sugar.adapt_to_cameras(nerfmodel.training_cameras)
                 # TODO: resize GT images
         
+            if recovery.store and (iteration % 500 == 0 or iteration >= num_iterations):
+                recovery.save(sugar, optimizer,
+                    gaussian_densifier if 'gaussian_densifier' in locals() else None,
+                    iteration, shuffled_idx, end_idx,
+                    {'epoch': epoch, 'train_losses': train_losses, 'loss': loss.detach().item(),
+                     'current_sh_levels': current_sh_levels, 'current_resolution_factor': current_resolution_factor},
+                    force=iteration >= num_iterations)
+            if iteration >= num_iterations:
+                break
+
         epoch += 1
 
     CONSOLE.print(f"Training finished after {num_iterations} iterations with loss={loss.detach().item()}.")

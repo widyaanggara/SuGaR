@@ -13,6 +13,7 @@ from pipeline_tools.logger_utils import ThesisLogger
 from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.dataset_registry import has_colmap_model
 from pipeline_tools.run_settings import add_resolution_arguments, resolution_settings, colmap_signature
+from pipeline_tools.recovery_state import configure_recovery, scene_identity, code_identity
 
 
 def train_vanilla_3dgs(scene_path: str,
@@ -25,7 +26,8 @@ def train_vanilla_3dgs(scene_path: str,
                        gpu: int = 0,
                        logger: ThesisLogger = None,
                        image_downscale: int = 1,
-                       image_max_size: int = 1600):
+                       image_max_size: int = 1600,
+                       resume: bool = True):
     """
     Melatih model vanilla 3D Gaussian Splatting baseline.
     Menyimpan checkpoint pada 7.000 iterasi (untuk SuGaR) dan 30.000 iterasi (baseline final).
@@ -40,6 +42,14 @@ def train_vanilla_3dgs(scene_path: str,
     train_script = PROJECT_ROOT / "gaussian_splatting" / "train.py"
     if not train_script.exists():
         raise FileNotFoundError(f"Script pelatihan 3DGS tidak ditemukan di: {train_script}")
+    configure_recovery(output_dir / 'recovery/identity.json', {
+        'scene': scene_identity(scene_path), 'iterations': iterations, 'image_downscale': image_downscale,
+        'image_max_size': image_max_size, 'white_background': white_background, 'eval_split': eval_split,
+        'code': code_identity(PROJECT_ROOT, ['gaussian_splatting/train.py',
+            'gaussian_splatting/scene/gaussian_model.py', 'gaussian_splatting/scene/__init__.py',
+            'gaussian_splatting/scene/dataset_readers.py', 'gaussian_splatting/arguments/__init__.py',
+            'gaussian_splatting/gaussian_renderer/__init__.py', 'gaussian_splatting/utils/loss_utils.py',
+            'sugar_utils/training_recovery.py'])}, resume)
 
     cmd = [
         sys.executable,
@@ -53,7 +63,10 @@ def train_vanilla_3dgs(scene_path: str,
         "--iterations", str(iterations),
         "--save_iterations", *[str(i) for i in save_iterations],
         "--checkpoint_iterations", *[str(i) for i in checkpoint_iterations],
+        '--recovery_config', str(output_dir / 'recovery/identity.json'),
     ]
+    if resume:
+        cmd.append('--resume_training')
     if white_background:
         cmd.append("-w")
     if eval_split:
@@ -127,6 +140,7 @@ def main():
     parser.add_argument("--iterations", type=int, default=30000, help="Total iterasi pelatihan (default: 30000).")
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU (default: 0).")
+    parser.add_argument('--no_resume', action='store_true', help='Mulai training baru tanpa memulihkan checkpoint.')
     add_resolution_arguments(parser)
 
     args = parser.parse_args()
@@ -159,7 +173,8 @@ def main():
                 gpu=args.gpu,
                 logger=logger,
                 image_downscale=args.image_downscale,
-                image_max_size=args.image_max_size
+                image_max_size=args.image_max_size,
+                resume=not args.no_resume
             )
         logger.finalize(success=True)
     except Exception as e:

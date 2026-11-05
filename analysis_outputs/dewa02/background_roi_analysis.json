@@ -1,0 +1,32 @@
+[
+  {
+    "index": 7,
+    "background_rectangle_normalized": [
+      0,
+      0,
+      0.33,
+      0.6
+    ],
+    "area_fraction": 0.1977043673012318,
+    "extra_squared_error_fraction": 0.7389668171973207,
+    "3dgs_background_roi_psnr": 24.772237222420888,
+    "3dgs_remaining_image_psnr": 26.727487308594494,
+    "sugar_background_roi_psnr": 15.294345688772124,
+    "sugar_remaining_image_psnr": 23.558899938235612
+  },
+  {
+    "index": 48,
+    "background_rectangle_normalized": [
+      0,
+      0,
+      0.3,
+      0.8
+    ],
+    "area_fraction": 0.2398656215005599,
+    "extra_squared_error_fraction": 0.7374481141110466,
+    "3dgs_background_roi_psnr": 25.207866824801876,
+    "3dgs_remaining_image_psnr": 26.323524932541375,
+    "sugar_background_roi_psnr": 16.176011307218825,
+    "sugar_remaining_image_psnr": 23.276398291005627
+  }
+]

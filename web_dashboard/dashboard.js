@@ -8,6 +8,14 @@ let selectedLogLoading = false;
 let lastQueueSignature = null;
 let lastGridSignature = null;
 let cachedMetrics = [];
+let editingModel = null;
+let modelNameSaving = false;
+let queueSelection = null;
+let selectedQueueAction = 'full_pipeline';
+let queueSubmitting = false;
+let calibrationSaving = false;
+const geometryInputs = new Map();
+const queueActions = ['full_pipeline', 'colmap', '3dgs', 'sugar', 'evaluate_visual', 'evaluate', 'extract_frames'];
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -15,8 +23,71 @@ const fmtN = value => Number.isFinite(parseFloat(value)) ? parseFloat(value).toF
 const fmtSec = seconds => [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, Math.floor(seconds) % 60].map(n => String(n).padStart(2, '0')).join(':');
 const actionLabel = action => ({full_pipeline: 'Pipeline lengkap', colmap: 'Rekonstruksi COLMAP',
   '3dgs': 'Training 3DGS', sugar: 'Training SuGaR', extract_frames: 'Ekstraksi frame',
-  evaluate_visual: 'Evaluasi visual', evaluate: 'Evaluasi LiDAR'}[action] || action || '');
+  evaluate_visual: 'Evaluasi visual', evaluate: 'Evaluasi geometri'}[action] || action || '');
 const settingsTabs = ['resolution', 'colmap', 'training', 'lidar'];
+const isFilePreview = window.location?.protocol === 'file:' || window.location?.search === '?preview=1';
+const previewMessage = 'Pratinjau desain lokal. Data penelitian dan eksekusi pipeline tersedia melalui dashboard yang berjalan di server.';
+
+function defaultModelName(mdl) {
+  return mdl.startsWith('model_') ? 'Model ' + mdl.slice(6) : 'Benchmark ' + mdl.split('_').at(-1);
+}
+
+function modelName(cls, mdl) {
+  return cachedStatus[cls]?.[mdl]?.display_name || defaultModelName(mdl);
+}
+
+function modelIdentityHtml(cls, mdl, displayName = modelName(cls, mdl)) {
+  return `<span>${esc(displayName)}</span><small class="model-reference">${esc(cls)}/${esc(mdl)}</small>`;
+}
+
+function editModelName(cls, mdl) {
+  if (modelNameSaving || !cachedStatus[cls]?.[mdl]) return;
+  editingModel = {class_name: cls, model_id: mdl};
+  $('modelNameTarget').textContent = `${cls} / ${mdl}`;
+  $('modelNameInput').value = cachedStatus[cls][mdl].custom_name || '';
+  $('modelNameInput').placeholder = defaultModelName(mdl);
+  $('modelNameError').textContent = '';
+  $('modelNameDialog').showModal();
+  $('modelNameInput').focus();
+}
+
+function closeModelName() {
+  if (!modelNameSaving) {
+    $('modelNameDialog').close();
+    editingModel = null;
+  }
+}
+
+async function saveModelName() {
+  if (!editingModel || modelNameSaving) return;
+  const target = editingModel;
+  modelNameSaving = true;
+  $('modelNameSave').disabled = true;
+  $('modelNameCancel').disabled = true;
+  $('modelNameInput').disabled = true;
+  $('modelNameError').textContent = '';
+  try {
+    const result = await api('/api/model-name', {...target, display_name: $('modelNameInput').value.trim()});
+    const info = cachedStatus[target.class_name]?.[target.model_id];
+    if (info) {
+      info.display_name = result.display_name;
+      info.custom_name = result.custom_name;
+    }
+    renderGrid(cachedStatus);
+    renderMetrics();
+    $('modelNameDialog').close();
+    editingModel = null;
+    showToast(`Nama disimpan: ${result.display_name}`);
+    await pollLogs();
+  } catch (error) {
+    $('modelNameError').textContent = error.message;
+  } finally {
+    modelNameSaving = false;
+    $('modelNameSave').disabled = false;
+    $('modelNameCancel').disabled = false;
+    $('modelNameInput').disabled = false;
+  }
+}
 
 function switchSettingsTab(name, focus = false) {
   if (!settingsTabs.includes(name)) return;
@@ -30,11 +101,15 @@ function switchSettingsTab(name, focus = false) {
 }
 
 function initializeNavigation() {
+  const compact = window.matchMedia?.('(max-width: 850px)');
+  const orientTabs = () => $('settingsTabList').setAttribute('aria-orientation', compact?.matches ? 'horizontal' : 'vertical');
+  orientTabs();
+  compact?.addEventListener?.('change', orientTabs);
   for (const [index, name] of settingsTabs.entries()) {
     $('tab-' + name).onkeydown = event => {
       let next;
-      if (event.key === 'ArrowRight') next = (index + 1) % settingsTabs.length;
-      if (event.key === 'ArrowLeft') next = (index + settingsTabs.length - 1) % settingsTabs.length;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % settingsTabs.length;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index + settingsTabs.length - 1) % settingsTabs.length;
       if (event.key === 'Home') next = 0;
       if (event.key === 'End') next = settingsTabs.length - 1;
       if (next !== undefined) { event.preventDefault(); switchSettingsTab(settingsTabs[next], true); }
@@ -50,6 +125,7 @@ function initializeNavigation() {
 }
 
 async function api(path, data) {
+  if (isFilePreview) throw new Error(previewMessage);
   const response = await fetch(path, data === undefined ? {} : {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
   });
@@ -61,10 +137,39 @@ async function api(path, data) {
 const settingControls = ['gpuId', 'refinementTime', 'meshTriangles', 'resumeCompleted',
   'colmapMaxImageSize', 'imageDownscale', 'imageMaxSize', 'colmapDevice', 'colmapMatcher',
   'colmapMaxFeatures', 'colmapSequentialOverlap', 'sourceWidth', 'sourceHeight',
-  'gaussiansPerTriangle', 'regularization'];
+  'gaussiansPerTriangle', 'regularization', 'evaluationMethod'];
 let presets = {};
 const sugarControlIds = {vertices: 'meshTriangles', gaussians_per_triangle: 'gaussiansPerTriangle',
   refinement_time: 'refinementTime', regularization: 'regularization'};
+
+function readExperimentSettings() {
+  return {
+    gpu: Number($('gpuId').value), refinement_time: $('refinementTime').value,
+    vertices: Number($('meshTriangles').value), resume: $('resumeCompleted').checked,
+    gaussians_per_triangle: Number($('gaussiansPerTriangle').value),
+    regularization: $('regularization').value,
+    colmap_max_image_size: Number($('colmapMaxImageSize').value),
+    image_downscale: Number($('imageDownscale').value),
+    image_max_size: Number($('imageMaxSize').value),
+    colmap_device: $('colmapDevice').value,
+    colmap_matcher: $('colmapMatcher').value,
+    colmap_max_features: Number($('colmapMaxFeatures').value),
+    colmap_sequential_overlap: Number($('colmapSequentialOverlap').value),
+    evaluation_method: $('evaluationMethod').value
+  };
+}
+
+function renderSettingsSummary() {
+  const values = readExperimentSettings();
+  const device = {auto: 'Otomatis', cpu: 'CPU', cuda: 'CUDA'}[values.colmap_device];
+  const validSize = value => Number.isInteger(value) && value >= 256 && value <= 16384;
+  $('summaryGpu').textContent = Number.isInteger(values.gpu) && values.gpu >= 0 ? `GPU ${values.gpu}` : 'Periksa GPU ID';
+  $('summaryColmap').textContent = device && validSize(values.colmap_max_image_size) ? `${device} / maks. ${values.colmap_max_image_size} px` : 'Periksa pengaturan COLMAP';
+  $('summaryTraining').textContent = [1, 2, 4, 8].includes(values.image_downscale) && (values.image_max_size === 0 || validSize(values.image_max_size)) ?
+    `${values.image_downscale}× / ${values.image_max_size ? 'maks. ' + values.image_max_size + ' px' : 'tanpa batas tambahan'}` : 'Periksa resolusi training';
+  const refinement = {short: '2.000', medium: '7.000', long: '15.000'}[values.refinement_time];
+  $('summaryRefinement').textContent = refinement ? `${refinement} iterasi` : 'Pilih refinement';
+}
 
 function applyPreset(name) {
   if (presets[name]) {
@@ -87,6 +192,7 @@ function updateSettings(custom = true) {
     const trainingFactor = Math.max(downscale, cap ? Math.max(width, height) / cap : 1);
     $('resolutionPreview').textContent = `Acuan ${width} × ${height} px → fitur COLMAP ≈ ${size(Math.max(1, Math.max(width, height) / colmapCap))} px; training & evaluasi ≈ ${size(trainingFactor)} px. Foto asli tidak diubah.`;
   } else $('resolutionPreview').textContent = 'Isi ukuran acuan dan pengaturan resolusi yang valid untuk melihat perkiraan.';
+  renderSettingsSummary();
   try {
     const values = Object.fromEntries(settingControls.map(id => [id, id === 'resumeCompleted' ? $(id).checked : $(id).value]));
     window.localStorage?.setItem('sugar-experiment-settings-v1', JSON.stringify({...values, settingsPreset: preset}));
@@ -135,6 +241,27 @@ async function checkColmap() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   initializeNavigation();
+  if (isFilePreview) {
+    // Empty slots are design fixtures, never presented as server research data.
+    cachedStatus = Object.fromEntries(['Dewa', 'Dewi', 'Mitologi', 'Penabuh', 'Pengapit', 'Punakawan', 'Raksasa', 'Wanara', 'TanksAndTemples']
+      .map(cls => [cls, Object.fromEntries((cls === 'TanksAndTemples' ? ['tanks_and_temples_1', 'tanks_and_temples_2'] : ['model_01', 'model_02'])
+        .map(mdl => [mdl, {images_count: 0, input_path: `datasets/${cls}/${mdl}/input/`, output_path: `outputs/{3dgs,sugar}/${cls}/${mdl}/`}]))]));
+    initializeSettings();
+    $('previewNotice').hidden = false;
+    $('previewNotice').textContent = previewMessage;
+    $('settingsPreset').disabled = true;
+    $('resetSugarPreset').disabled = true;
+    $('presetDescription').textContent = 'Pratinjau pengaturan kustom. Preset resmi dimuat melalui dashboard server; perubahan di sini tidak mengubah pekerjaan penelitian.';
+    $('btnCheckColmap').disabled = true;
+    $('colmapCapability').textContent = 'Pemeriksaan build COLMAP tersedia di server.';
+    $('queueSummary').textContent = 'Pratinjau lokal — data antrean server tidak dimuat';
+    $('queueBody').innerHTML = '<tr><td colspan="5" class="empty-msg">Data antrean tersedia pada dashboard server.</td></tr>';
+    $('kpiCompleted').textContent = '— / 18';
+    $('kpiCompletedSub').textContent = 'Data server tidak dimuat di pratinjau';
+    renderMetrics();
+    renderGrid(cachedStatus);
+    return;
+  }
   try {
     const references = await api('/api/presets');
     presets = references.presets;
@@ -153,7 +280,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     const catalog = await api('/api/catalog');
     totalModels = catalog.total_models;
     $('kpiTotal').textContent = totalModels;
-    $('btnRunAll').textContent = `Antrekan Semua ${totalModels} Model`;
     const filters = $('filterBar');
     filters.innerHTML = '';
     for (const cls of ['ALL', ...Object.keys(catalog.classes)]) {
@@ -171,6 +297,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function refreshAll() {
+  if (isFilePreview) { showToast(previewMessage); return; }
   lastGridSignature = null;
   await Promise.all([refreshStatus(false), refreshMetrics(), pollLogs()]);
 }
@@ -179,6 +306,7 @@ async function refreshStatus(feedback) {
   try {
     cachedStatus = await api('/api/status');
     renderGrid(cachedStatus);
+    renderMetrics();
     const entries = Object.values(cachedStatus).flatMap(models => Object.values(models));
     const done = entries.filter(info => info.overall_status === 'Completed').length;
     $('kpiCompleted').textContent = `${done} / ${totalModels}`;
@@ -203,30 +331,25 @@ function renderGrid(data) {
     let cells = '';
     for (const [mdl, info] of Object.entries(models)) {
       const target = `'${cls}','${mdl}'`;
-      const modelLabel = mdl.startsWith('model_') ? 'Model ' + mdl.slice(6) : 'Benchmark ' + mdl.split('_').at(-1);
+      const modelLabel = info.display_name || defaultModelName(mdl);
       cells += `<div class="model-cell">
-        <div class="model-label"><span>${esc(modelLabel)}</span>${info.has_video ? chip(true, 'Video') : `<span class="model-code">${esc(mdl)}</span>`}</div>
+        <div class="model-label"><div class="model-identity"><span class="model-title">${esc(modelLabel)}</span><span class="model-code">${esc(mdl)}</span></div><div class="model-tools">${info.has_video ? chip(true, 'Video') : ''}<button type="button" class="btn-name" aria-label="Ubah nama ${esc(cls)} ${esc(mdl)}" onclick="editModelName(${target})">Ubah nama</button></div></div>
         <div class="pipeline-rows">
           <div class="pipeline-row"><span><span class="stage-index">01</span>Foto input</span>${chip(info.images_count > 0, `${info.images_count} foto`, 'Belum ada foto')}</div>
           <div class="pipeline-row"><span><span class="stage-index">02</span>COLMAP</span>${chip(info.colmap_done)}</div>
           <div class="pipeline-row"><span><span class="stage-index">03</span>3DGS</span>${chip(info['3dgs_30k'], '30k iter', info['3dgs_7k'] ? '7k iter' : 'Menunggu')}</div>
           <div class="pipeline-row"><span><span class="stage-index">04</span>SuGaR + OBJ</span>${chip(info.sugar_obj, 'OBJ lengkap', info.sugar_mesh ? 'Mesh kasar' : 'Menunggu')}</div>
           <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual</span>${chip(info.evaluated)}</div>
+          <div class="pipeline-row"><span><span class="stage-index">06</span>Evaluasi geometri</span>${chip(info.geometry_evaluated, '2 metode selesai', !info.has_gt_lidar ? 'Perlu LiDAR' : !info.geometry_settings ? 'Atur LiDAR' : 'Menunggu')}</div>
         </div>
-        <details class="dataset-path"><summary>Lihat folder input &amp; output</summary><code>${esc(info.input_path)}</code><code>${esc(info.output_path)}</code></details>
+        <details class="dataset-path"><summary>Lihat folder input &amp; output</summary><code>${esc(info.input_path)}</code><code>${esc(info.output_path)}</code><code>${esc(`datasets/${cls}/${mdl}/ground_truth/lidar.ply`)}</code></details>
         <div class="step-buttons">
-          <button class="btn btn-primary btn-sm btn-full" onclick="triggerRun('full_pipeline',${target})">+ Antrekan Pipeline Lengkap</button>
-          <button class="btn-step" onclick="triggerRun('colmap',${target})">2. COLMAP</button>
-          <button class="btn-step" onclick="triggerRun('3dgs',${target})">3. Latih 3DGS</button>
-          <button class="btn-step" onclick="triggerRun('sugar',${target})">4. Latih SuGaR</button>
-          <button class="btn-step" onclick="triggerRun('evaluate_visual',${target})">5. Evaluasi Visual</button>
-          ${info.has_video ? `<button class="btn-step" onclick="triggerRun('extract_frames',${target})">1. Ekstrak Frame</button>` : ''}
-          ${info.has_gt_lidar ? `<button class="btn-step" onclick="triggerRun('evaluate',${target})">Evaluasi LiDAR</button>` : ''}
+          <button class="btn btn-primary btn-sm btn-full" onclick="openQueueDialog(${target})">Antrekan model ini</button>
         </div><div class="preview-box" id="preview-box-${cls}-${mdl}"></div></div>`;
     }
     const number = String(Object.keys(data).indexOf(cls) + 1).padStart(2, '0');
     card.innerHTML = `<div class="class-header"><div class="class-heading"><span class="class-number">${number}</span><div><div class="class-name">${esc(cls === 'TanksAndTemples' ? 'Tanks & Temples' : cls)}</div><div class="class-meta">${Object.keys(models).length} model · ${cls === 'TanksAndTemples' ? 'Benchmark rekonstruksi' : 'Tipologi Togog Bali'}</div></div></div>
-      <button class="btn btn-ghost btn-sm" onclick="triggerRun('full_pipeline','${cls}','')">Antrekan Kelas</button></div>
+      <button class="btn btn-ghost btn-sm" onclick="openQueueDialog('${cls}','')">Antrekan Kelas</button></div>
       <div class="class-body">${cells}</div>`;
     $('modelGrid').appendChild(card);
     for (const mdl of Object.keys(models)) loadPreview(cls, mdl);
@@ -239,28 +362,257 @@ function filterClass(cls) {
   renderGrid(cachedStatus);
 }
 
-async function triggerRun(action, cls, mdl) {
-  const payload = {action, class_name: cls, model_id: mdl,
-    gpu: Number($('gpuId').value), refinement_time: $('refinementTime').value,
-    vertices: Number($('meshTriangles').value), resume: $('resumeCompleted').checked,
-    gaussians_per_triangle: Number($('gaussiansPerTriangle').value),
-    regularization: $('regularization').value,
-    colmap_max_image_size: Number($('colmapMaxImageSize').value),
-    image_downscale: Number($('imageDownscale').value),
-    image_max_size: Number($('imageMaxSize').value),
-    colmap_device: $('colmapDevice').value,
-    colmap_matcher: $('colmapMatcher').value,
-    colmap_max_features: Number($('colmapMaxFeatures').value),
-    colmap_sequential_overlap: Number($('colmapSequentialOverlap').value),
-    evaluation_method: $('evaluationMethod').value};
-  if (action === 'evaluate') {
-    const text = $('scaleFactor').value.trim();
-    payload.scale_factor = Number(text);
-    if (!text || !Number.isFinite(payload.scale_factor) || payload.scale_factor <= 0) {
-      showToast('Isi faktor kalibrasi meter per unit model untuk evaluasi LiDAR.');
-      return;
+function selectedModelPairs() {
+  if (!queueSelection) return [];
+  return Object.entries(cachedStatus).flatMap(([cls, models]) => Object.entries(models)
+    .filter(([mdl]) => (!queueSelection.class_name || queueSelection.class_name === cls) &&
+      (!queueSelection.model_id || queueSelection.model_id === mdl))
+    .map(([mdl, info]) => ({cls, mdl, info})));
+}
+
+function openQueueDialog(cls = '', mdl = '', action = 'full_pipeline') {
+  if (queueSubmitting || calibrationSaving) return;
+  queueSelection = {class_name: cls, model_id: mdl};
+  $('queueClass').innerHTML = '<option value="">Semua kelas</option>' + Object.keys(cachedStatus)
+    .map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
+  $('queueClass').value = cls;
+  populateQueueModels(mdl);
+  $('queueMethod').value = $('evaluationMethod').value || 'both';
+  $('queuePipelineStart').value = 'auto';
+  $('queueApplyIcp').checked = true;
+  $('queueAlignment').value = mdl ? cachedStatus[cls]?.[mdl]?.geometry_settings?.alignment_mode || 'automatic' : 'automatic';
+  $('queueDialogError').textContent = '';
+  geometryInputs.clear();
+  renderQueueTargets();
+  chooseQueueAction(action);
+  $('queueDialog').showModal();
+}
+
+function populateQueueModels(mdl = '') {
+  const cls = $('queueClass').value;
+  $('queueModel').innerHTML = '<option value="">Semua model</option>' + (cls ? Object.keys(cachedStatus[cls] || {})
+    .map(id => `<option value="${esc(id)}">${esc(modelName(cls, id))} (${esc(id)})</option>`).join('') : '');
+  $('queueModel').value = mdl;
+  $('queueModel').disabled = !cls;
+}
+
+function changeQueueTarget(classChanged) {
+  if (queueSubmitting || calibrationSaving) return;
+  if (classChanged) populateQueueModels();
+  queueSelection = {class_name: $('queueClass').value, model_id: $('queueModel').value};
+  renderQueueTargets();
+  const single = !!queueSelection.class_name && !!queueSelection.model_id;
+  chooseQueueAction(!single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(selectedQueueAction)
+    ? 'full_pipeline' : selectedQueueAction);
+}
+
+function renderQueueTargets() {
+  const {class_name: cls, model_id: mdl} = queueSelection;
+  const pairs = selectedModelPairs();
+  $('queueDialogHeading').textContent = mdl ? 'Antrekan model ini' : 'Antrekan model';
+  $('queueDialogScope').textContent = mdl ? `${modelName(cls, mdl)} · ${cls}/${mdl}` :
+    cls ? `Pilih proses untuk kelas ${cls}.` : 'Atur target dan proses, lalu tambahkan ke antrean.';
+  $('queueTargetCount').textContent = `${pairs.length} model dipilih`;
+  $('geometryCalibrationBody').innerHTML = '';
+  for (const {cls, mdl, info} of pairs) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.innerHTML = `${modelIdentityHtml(cls, mdl)}<div class="geometry-file-state">${chip(info.has_gt_lidar, 'LiDAR ada', 'LiDAR belum ada')}${chip(info.geometry_sources?.['3DGS'], '3DGS ada', '3DGS belum ada')}${chip(info.geometry_sources?.SuGaR, 'SuGaR ada', 'SuGaR belum ada')}</div>`;
+    row.appendChild(cell);
+    let inputs = geometryInputs.get(`${cls}/${mdl}`);
+    if (!inputs) {
+      const unit = document.createElement('select');
+      unit.innerHTML = '<option value="">Pilih satuan…</option><option value="m">Meter (m)</option><option value="cm">Sentimeter (cm)</option><option value="mm">Milimeter (mm)</option>';
+      unit.setAttribute('aria-label', `Satuan LiDAR ${cls} ${mdl}`);
+      unit.value = info.geometry_settings?.lidar_unit || '';
+      unit.onchange = updateQueuePlan;
+      const scale = document.createElement('input');
+      scale.type = 'number'; scale.min = '0'; scale.step = 'any'; scale.placeholder = 'Hasil kalibrasi';
+      scale.setAttribute('aria-label', `Skala manual ${cls} ${mdl}`);
+      scale.value = String(info.geometry_settings?.scale_factor ?? info.geometry_scale_factor ?? '');
+      scale.oninput = updateQueuePlan;
+      inputs = {unit, scale};
+      geometryInputs.set(`${cls}/${mdl}`, inputs);
+    }
+    for (const input of [inputs.unit, inputs.scale]) {
+      const inputCell = document.createElement('td');
+      inputCell.appendChild(input);
+      if (input === inputs.scale) inputs.scaleCell = inputCell;
+      row.appendChild(inputCell);
+    }
+    $('geometryCalibrationBody').appendChild(row);
+  }
+}
+
+function closeQueueDialog() {
+  if (queueSubmitting || calibrationSaving) return;
+  $('queueDialog').close();
+  queueSelection = null;
+  geometryInputs.clear();
+}
+
+function chooseQueueAction(action) {
+  if (!queueActions.includes(action) || queueSubmitting || calibrationSaving) return;
+  const single = !!queueSelection?.class_name && !!queueSelection?.model_id;
+  $('queueProcessOptions').dataset.scope = single ? 'single' : 'bulk';
+  if (!single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(action)) return;
+  selectedQueueAction = action;
+  for (const name of queueActions) {
+    const button = $('queue-action-' + name);
+    button.setAttribute('aria-pressed', String(name === action));
+    button.disabled = !single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(name);
+    button.hidden = !single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(name);
+  }
+  $('queue-action-extract_frames').hidden = !single || !selectedModelPairs()[0]?.info.has_video;
+  const evaluation = ['evaluate_visual', 'evaluate'].includes(action);
+  $('queueMethodOptions').hidden = !evaluation;
+  $('queueGeometryOptions').hidden = action !== 'evaluate';
+  $('queuePipelineOptions').hidden = action !== 'full_pipeline';
+  $('queueActionHelp').textContent = {
+    full_pipeline: 'Mengikuti pengaturan eksperimen hingga evaluasi visual. Evaluasi geometri dijalankan terpisah setelah scan LiDAR tersedia.',
+    colmap: 'Menghitung fitur, pencocokan, pose kamera, dan undistorsi dari foto input.',
+    '3dgs': 'Melatih baseline 3DGS dari dataset COLMAP yang sudah tersedia.',
+    sugar: 'Menjalankan SuGaR menggunakan checkpoint 3DGS 7.000 iterasi yang sudah tersedia.',
+    evaluate_visual: 'Menghitung PSNR, SSIM, dan LPIPS dari checkpoint yang ada. Tidak menjalankan training ulang.',
+    evaluate: 'Menghitung Chamfer, Precision, Recall, dan F1 bersama pada ambang 2 cm dan 5 cm, tanpa training ulang.',
+    extract_frames: 'Mengekstrak frame video ke input. Folder input harus belum berisi foto.'
+  }[action];
+  $('queueDialogError').textContent = '';
+  updateQueuePlan();
+}
+
+function queuePlan() {
+  const action = selectedQueueAction;
+  const evaluation = ['evaluate_visual', 'evaluate'].includes(action);
+  const methods = evaluation ? ($('queueMethod').value === 'both' ? ['3DGS', 'SuGaR'] : [$('queueMethod').value]) : [''];
+  const ready = [], skipped = [];
+  for (const {cls, mdl, info} of selectedModelPairs()) {
+    for (const method of methods) {
+      let reason = '';
+      if (action === 'full_pipeline' && !info.images_count && !info.has_video) reason = 'foto/video belum tersedia';
+      if (action === 'full_pipeline' && $('queuePipelineStart').value === 'existing_colmap' && !info.colmap_done) reason = 'images/ hasil undistorsi dan sparse/0 COLMAP belum lengkap';
+      if (action === 'colmap' && !info.images_count) reason = 'foto input belum tersedia';
+      if (action === '3dgs' && !info.colmap_done) reason = 'hasil COLMAP belum lengkap';
+      if (action === 'sugar' && (!info.colmap_done || !info['3dgs_7k'])) reason = 'COLMAP dan checkpoint 3DGS 7k diperlukan';
+      if (action === 'extract_frames' && (!info.has_video || info.input_count > 0)) reason = 'perlu video dan folder input kosong';
+      if (action === 'evaluate_visual' && !(method === '3DGS' ? info['3dgs_30k'] : info['3dgs_7k'] && info.sugar_obj)) reason = `checkpoint ${method} belum lengkap`;
+      if (action === 'evaluate') {
+        const inputs = geometryInputs.get(`${cls}/${mdl}`);
+        const text = inputs?.scale.value.trim() || '';
+        if (!info.has_gt_lidar) reason = 'ground_truth/lidar.ply belum tersedia';
+        else if (!['m', 'cm', 'mm'].includes(inputs?.unit.value)) reason = 'pilih satuan koordinat LiDAR';
+        else if ($('queueAlignment').value === 'manual' && (!text || !Number.isFinite(Number(text)) || Number(text) <= 0)) reason = 'isi faktor skala manual positif';
+        else if (!info.geometry_sources?.[method]) reason = `hasil rekonstruksi ${method} belum tersedia`;
+      }
+      const target = `${modelName(cls, mdl)} (${cls}/${mdl}${method ? ' · ' + method : ''})`;
+      if (reason) skipped.push(`${target}: ${reason}`);
+      else ready.push({cls, mdl, method});
     }
   }
+  return {ready, skipped};
+}
+
+function updateQueuePlan() {
+  if (!queueSelection) return;
+  const {ready, skipped} = queuePlan();
+  const busy = queueSubmitting || calibrationSaving;
+  const manual = $('queueAlignment').value === 'manual';
+  const selectedInputs = selectedModelPairs().map(({cls, mdl}) => geometryInputs.get(`${cls}/${mdl}`));
+  const invalidScale = selectedQueueAction === 'evaluate' && manual && selectedInputs.some(inputs => {
+    const text = inputs.scale.value.trim();
+    return text && (!Number.isFinite(Number(text)) || Number(text) <= 0);
+  });
+  $('queuePlanSummary').textContent = isFilePreview ? 'Pratinjau lokal — tidak mengirim pekerjaan' : invalidScale ? 'Perbaiki skala manual yang tidak valid' : `${ready.length} pekerjaan siap diantrekan`;
+  $('queuePlanNote').textContent = skipped.length ? `${skipped.length} target belum siap dan akan dilewati. Buka rincian untuk melihat yang perlu disiapkan.` : 'Semua target siap. Pekerjaan berjalan bergantian menggunakan pengaturan eksperimen saat ini.';
+  $('queueSkippedDetails').hidden = !skipped.length;
+  $('queueSkippedSummary').textContent = `${skipped.length} target yang belum siap`;
+  $('queueSkippedList').innerHTML = skipped.map(reason => `<li>${esc(reason)}</li>`).join('');
+  $('queueDialogSubmit').disabled = isFilePreview || busy || invalidScale || !ready.length;
+  $('queueDialogSubmit').textContent = queueSubmitting ? 'Menambahkan...' : `Antrekan ${ready.length} pekerjaan`;
+  $('queueDialogCancel').disabled = busy;
+  $('queueDialogClose').disabled = busy;
+  $('queueSaveCalibration').disabled = isFilePreview || busy || invalidScale || !selectedInputs.some(inputs => inputs.unit.value && (!manual || Number(inputs.scale.value) > 0));
+  $('queueMethod').disabled = busy;
+  $('queuePipelineStart').disabled = busy;
+  $('queuePipelineHelp').textContent = $('queuePipelineStart').value === 'existing_colmap'
+    ? 'Memakai images/ dan sparse/0 yang sudah ada, termasuk hasil dari komputer lain. Langsung menjalankan 3DGS → SuGaR → evaluasi visual. COLMAP tidak dijalankan ulang; target yang belum lengkap dilewati. Pengaturan resolusi training tetap berlaku.'
+    : 'Dengan Lewati tahap yang selesai aktif, setiap model melanjutkan dari hasil terakhir yang tersedia. COLMAP lengkap, termasuk hasil teman, langsung dipakai. Training dan evaluasi yang lengkap serta cocok dilewati; checkpoint parsial yang cocok dipulihkan. Pengaturan COLMAP diterapkan hanya saat membuat COLMAP baru. Untuk interrupted, gunakan Antrekan Ulang agar pengaturan asli dan prioritas pemulihannya dipertahankan.';
+  $('queueApplyIcp').disabled = busy;
+  $('queueAlignment').disabled = busy;
+  $('queueClass').disabled = busy;
+  $('queueModel').disabled = busy || !queueSelection.class_name;
+  $('geometryScaleHeading').hidden = !manual;
+  $('queueIcpOption').hidden = !manual;
+  $('queueAlignmentNote').textContent = manual ? 'Faktor manual mengubah unit rekonstruksi menjadi meter. Satuan file LiDAR tetap harus dipilih dengan benar.' : 'Tidak perlu memasukkan tinggi atau faktor skala. Sistem mencari penyelarasan, menyimpan transformasi dan model overlay, lalu menghentikan evaluasi jika pemeriksaan numeriknya gagal. Tetap periksa overlay untuk skripsi.';
+  for (const inputs of selectedInputs) {
+    inputs.unit.disabled = busy;
+    inputs.scale.disabled = busy;
+    inputs.scaleCell.hidden = !manual;
+  }
+  const single = !!queueSelection.class_name && !!queueSelection.model_id;
+  for (const action of queueActions) $('queue-action-' + action).disabled = busy ||
+    (!single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(action));
+}
+
+async function persistQueueCalibration() {
+  const mode = $('queueAlignment').value;
+  const entries = selectedModelPairs().flatMap(({cls, mdl}) => {
+    const inputs = geometryInputs.get(`${cls}/${mdl}`);
+    const text = inputs.scale.value.trim();
+    if (!inputs.unit.value || (mode === 'manual' && !text)) return [{class_name: cls, model_id: mdl, clear: true}];
+    if (mode === 'manual' && (!Number.isFinite(Number(text)) || Number(text) <= 0)) throw new Error(`Skala ${cls}/${mdl} harus positif.`);
+    return [{class_name: cls, model_id: mdl, lidar_unit: inputs.unit.value, alignment_mode: mode,
+      ...(mode === 'manual' ? {scale_factor: Number(text)} : {})}];
+  });
+  if (!entries.some(entry => !entry.clear)) throw new Error('Pilih satuan LiDAR untuk setidaknya satu model.');
+  const result = await api('/api/geometry-settings', {settings: entries});
+  for (const {cls, mdl, info} of selectedModelPairs()) info.geometry_settings = result.settings[cls]?.[mdl] ?? null;
+  return result;
+}
+
+async function saveQueueCalibration() {
+  if (queueSubmitting || calibrationSaving || !queueSelection || isFilePreview) return;
+  calibrationSaving = true;
+  updateQueuePlan();
+  try {
+    await persistQueueCalibration();
+    $('queueDialogError').textContent = '';
+    showToast('Pengaturan LiDAR per model disimpan di server.');
+  } catch (error) { $('queueDialogError').textContent = error.message; }
+  finally { calibrationSaving = false; updateQueuePlan(); }
+}
+
+async function submitQueueDialog() {
+  if (!queueSelection || queueSubmitting || calibrationSaving || isFilePreview) return;
+  if (!queuePlan().ready.length) { $('queueDialogError').textContent = 'Belum ada model yang siap untuk proses ini.'; return; }
+  const action = selectedQueueAction;
+  const payload = {...readExperimentSettings(), ...queueSelection, action,
+    pipeline_start: action === 'full_pipeline' ? $('queuePipelineStart').value : 'auto',
+    evaluation_method: ['evaluate_visual', 'evaluate'].includes(action) ? $('queueMethod').value : 'SuGaR',
+    geometry_settings_required: action === 'evaluate',
+    apply_icp: $('queueAlignment').value === 'automatic' || $('queueApplyIcp').checked};
+  queueSubmitting = true;
+  updateQueuePlan();
+  $('queueDialogError').textContent = '';
+  try {
+    if (action === 'evaluate') await persistQueueCalibration();
+    const result = await api('/api/run', payload);
+    const skipped = result.skipped || result.skipped_empty || [];
+    showToast(`${result.added.length} pekerjaan ditambahkan; ${result.duplicates.length} sudah di antrean; ${skipped.length} target dilewati.`);
+    if (result.added.length || result.duplicates.length) {
+      $('queueDialog').close();
+      queueSelection = null;
+      geometryInputs.clear();
+    } else $('queueDialogError').textContent = skipped.join('\n') || 'Belum ada pekerjaan yang dapat ditambahkan.';
+    await pollLogs();
+  } catch (error) { $('queueDialogError').textContent = error.message; }
+  finally { queueSubmitting = false; updateQueuePlan(); }
+}
+
+async function triggerRun(action, cls, mdl) {
+  if (action === 'evaluate') { openQueueDialog(cls, mdl, action); return; }
+  const payload = {action, class_name: cls, model_id: mdl, ...readExperimentSettings()};
+  if (!['evaluate', 'evaluate_visual'].includes(action)) payload.evaluation_method = 'SuGaR';
   try {
     const results = [];
     if (action === 'evaluate_visual') {
@@ -289,19 +641,27 @@ async function triggerStop() {
 async function pollLogs() {
   try {
     const data = await api('/api/queue');
+    if (queueSelection) updateQueuePlan();
     $('btnStop').disabled = !data.is_running;
     $('jobStrip').classList.toggle('hidden', !data.is_running);
     $('jobLabel').textContent = actionLabel(data.action);
-    $('jobTarget').textContent = data.target || '';
+    const activeJob = data.jobs.find(job => ['RUNNING', 'STOPPING'].includes(job.status));
+    $('jobTarget').textContent = activeJob ? `${modelName(activeJob.class_name, activeJob.model_id)} · ${activeJob.class_name}/${activeJob.model_id}` : data.target || '';
     $('jobTimer').textContent = fmtSec(data.elapsed_seconds);
     $('termStatus').textContent = data.status.toLowerCase();
     $('termStatus').className = 'chip ' + (data.status === 'COMPLETED' ? 'chip-done' : data.status === 'FAILED' ? 'chip-warn' : 'chip-partial');
     $('queueSummary').textContent = `${data.paused ? 'Dijeda' : 'Aktif'} · ${data.counts.RUNNING || 0} berjalan · ${data.counts.QUEUED || 0} menunggu · ${data.counts.COMPLETED || 0} selesai · ${data.counts.FAILED || 0} gagal`;
     $('btnPause').textContent = data.paused ? 'Lanjutkan Antrean' : 'Jeda Antrean';
     $('btnPause').onclick = () => queueControl(data.paused ? 'resume' : 'pause');
-    const jobs = [...data.jobs.filter(j => ['RUNNING', 'STOPPING', 'QUEUED'].includes(j.status)),
+    const waiting = data.jobs.filter(j => ['RUNNING', 'STOPPING', 'QUEUED'].includes(j.status));
+    waiting.sort((a, b) => {
+      if (Number.isFinite(a.queue_position) && Number.isFinite(b.queue_position)) return a.queue_position - b.queue_position;
+      const rank = job => ['RUNNING', 'STOPPING'].includes(job.status) ? 0 : job.recovery ? 1 : 2;
+      return rank(a) - rank(b) || (a.recovery_requested_at ?? a.created_at ?? 0) - (b.recovery_requested_at ?? b.created_at ?? 0);
+    });
+    const jobs = [...waiting,
                   ...data.jobs.filter(j => !['RUNNING', 'STOPPING', 'QUEUED'].includes(j.status)).reverse().slice(0, 30)];
-    const queueSignature = JSON.stringify(jobs.map(job => [job.id, job.status, job.error]));
+    const queueSignature = JSON.stringify(jobs.map(job => [job.id, job.status, job.error, job.recovery, modelName(job.class_name, job.model_id)]));
     // Keep buttons in the DOM while the timer ticks, so polling cannot swallow a click.
     if (queueSignature !== lastQueueSignature) {
       $('queueBody').innerHTML = '';
@@ -310,7 +670,7 @@ async function pollLogs() {
         const failed = ['FAILED', 'INTERRUPTED', 'CANCELLED'].includes(job.status);
         const statusClass = job.status === 'COMPLETED' ? 'chip-done' : failed ? 'chip-error' :
           ['RUNNING', 'STOPPING'].includes(job.status) ? 'chip-partial' : 'chip-pending';
-        row.innerHTML = `<td>${esc(job.class_name)}/${esc(job.model_id)}</td><td>${esc(actionLabel(job.action))}${job.action.includes('evaluate') ? ' · ' + esc(job.evaluation_method) : ''}</td>
+        row.innerHTML = `<td>${modelIdentityHtml(job.class_name, job.model_id)}</td><td>${esc(actionLabel(job.action))}${job.action.includes('evaluate') ? ' · ' + esc(job.evaluation_method) : ''}${job.pipeline_start === 'existing_colmap' ? '<small class="model-reference">Mulai dari hasil COLMAP</small>' : ''}${job.recovery ? '<small class="model-reference">Prioritas pemulihan checkpoint</small>' : ''}</td>
           <td><span class="chip ${statusClass}">${esc(job.status)}</span></td>
           <td id="job-duration-${esc(job.id)}">${job.started_at ? fmtSec((job.finished_at || Date.now() / 1000) - job.started_at) : '-'}</td><td></td>`;
         const logButton = document.createElement('button');
@@ -322,8 +682,13 @@ async function pollLogs() {
           const button = document.createElement('button');
           button.className = 'btn btn-ghost btn-sm';
           button.textContent = failed ? 'Antrekan Ulang' : 'Batalkan';
+          if (failed) button.title = 'Pulihkan checkpoint yang cocok dan prioritaskan setelah pekerjaan aktif selesai.';
           button.onclick = failed ? async () => {
-            try { await api('/api/run', job); await pollLogs(); } catch (error) { showToast(error.message); }
+            try {
+              const result = await api('/api/queue/retry', {job_id: job.id});
+              showToast(result.already_running ? 'Model ini sudah berjalan.' : 'Pemulihan diprioritaskan setelah pekerjaan aktif selesai. Jika antrean dijeda, klik Lanjutkan Antrean.');
+              await pollLogs();
+            } catch (error) { showToast(error.message); }
           } : () => queueControl('cancel', {job_id: job.id});
           row.lastElementChild.appendChild(button);
         }
@@ -362,7 +727,7 @@ async function refreshSelectedJobLogs(force = false) {
   try {
     const data = await api(`/api/jobs/${id}/logs`);
     if (selectedLogId !== id || request !== selectedLogRequest) return;
-    $('jobLogTitle').textContent = `${data.job.class_name}/${data.job.model_id} · ${data.job.action}`;
+    $('jobLogTitle').textContent = `${modelName(data.job.class_name, data.job.model_id)} · ${data.job.class_name}/${data.job.model_id} · ${data.job.action}`;
     $('jobLogStatus').textContent = `${data.job.status} · diperbarui otomatis setiap 2 detik · 300 baris terakhir`;
     $('jobLogContent').textContent = data.logs.length ? data.logs.join('\n') : 'Belum ada log untuk pekerjaan ini.';
     if ($('jobLogFollow').checked) $('jobLogContent').scrollTop = $('jobLogContent').scrollHeight;
@@ -422,7 +787,7 @@ function renderMetrics() {
   const precision = `Precision @${threshold}cm (%)`, recall = `Recall @${threshold}cm (%)`, f1 = `F1 @${threshold}cm (%)`;
   const columns = ['Timestamp', 'Kelas', 'Model ID', 'Metode', 'PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
     precision, recall, f1, 'Peak VRAM (GB)', 'Total Waktu (Menit)'];
-  $('metricsBody').innerHTML = display.map(row => '<tr>' + columns.map((column, i) => `<td>${esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
+  $('metricsBody').innerHTML = display.map(row => '<tr>' + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
   for (const [column, target, context, unit, digits, explanation] of [
     ['PSNR (dB)', 'kpiPsnr', 'psnrContext', ' dB', 2, '↑'],
     ['SSIM', 'kpiSsim', 'ssimContext', '', 4, '↑'],
@@ -440,7 +805,10 @@ function renderMetrics() {
     $(id).textContent = `${label} @${threshold}cm (%)`;
   }
 }
-function exportCSV() { window.open('/api/metrics.csv', '_blank'); }
+function exportCSV() {
+  if (isFilePreview) { showToast(previewMessage); return; }
+  window.open('/api/metrics.csv', '_blank');
+}
 function showToast(message) {
   $('toast').textContent = message;
   $('toast').classList.add('show');
@@ -448,6 +816,7 @@ function showToast(message) {
 }
 
 async function loadPreview(cls, mdl) {
+  if (isFilePreview) return;
   try {
     const data = await api(`/api/previews/${cls}/${mdl}`);
     const box = $(`preview-box-${cls}-${mdl}`);

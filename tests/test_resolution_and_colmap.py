@@ -68,7 +68,8 @@ class ResolutionTests(unittest.TestCase):
     def test_api_validates_and_persists_settings_and_commands_pass_them(self):
         settings = {'colmap_max_image_size': 2000, 'image_downscale': 4, 'image_max_size': 1280}
         for action in ('colmap', '3dgs', 'sugar', 'evaluate_visual'):
-            jobs, _ = prepare_jobs(dict(action=action, class_name='Dewa', model_id='model_01', **settings))
+            with patch('web_dashboard.server.has_checkpoint', return_value=True), patch('web_dashboard.server.has_sugar_result', return_value=True):
+                jobs, _ = prepare_jobs(dict(action=action, class_name='Dewa', model_id='model_01', **settings))
             job = jobs[0]
             self.assertEqual({key: job[key] for key in settings}, settings)
             command = build_command(job)

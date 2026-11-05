@@ -1,0 +1,497 @@
+[
+  {
+    "index": 0,
+    "image": "IMG_000009",
+    "drop": 0.21854400634765625,
+    "3dgs_png_psnr": 19.590516183790513,
+    "3dgs_recorded_psnr": 19.59112548828125,
+    "sugar_png_psnr": 19.372173074377436,
+    "sugar_recorded_psnr": 19.372581481933594
+  },
+  {
+    "index": 1,
+    "image": "IMG_000018",
+    "drop": 4.551837921142578,
+    "3dgs_png_psnr": 26.383533834041522,
+    "3dgs_recorded_psnr": 26.38604736328125,
+    "sugar_png_psnr": 21.83339445349604,
+    "sugar_recorded_psnr": 21.834209442138672
+  },
+  {
+    "index": 2,
+    "image": "IMG_000026",
+    "drop": 4.159267425537109,
+    "3dgs_png_psnr": 25.816430867460284,
+    "3dgs_recorded_psnr": 25.818714141845703,
+    "sugar_png_psnr": 21.658638560441727,
+    "sugar_recorded_psnr": 21.659446716308594
+  },
+  {
+    "index": 3,
+    "image": "IMG_000034",
+    "drop": 1.4881973266601562,
+    "3dgs_png_psnr": 25.42918808152724,
+    "3dgs_recorded_psnr": 25.43095588684082,
+    "sugar_png_psnr": 23.94137764462695,
+    "sugar_recorded_psnr": 23.942758560180664
+  },
+  {
+    "index": 4,
+    "image": "IMG_000042",
+    "drop": 0.9797458648681641,
+    "3dgs_png_psnr": 21.118329277348412,
+    "3dgs_recorded_psnr": 21.118955612182617,
+    "sugar_png_psnr": 20.138590196426783,
+    "sugar_recorded_psnr": 20.139209747314453
+  },
+  {
+    "index": 5,
+    "image": "IMG_000050",
+    "drop": 1.8809700012207031,
+    "3dgs_png_psnr": 24.899139404001467,
+    "3dgs_recorded_psnr": 24.90079116821289,
+    "sugar_png_psnr": 23.01857983584426,
+    "sugar_recorded_psnr": 23.019821166992188
+  },
+  {
+    "index": 6,
+    "image": "IMG_000058",
+    "drop": 1.1955318450927734,
+    "3dgs_png_psnr": 26.056979322992866,
+    "3dgs_recorded_psnr": 26.059267044067383,
+    "sugar_png_psnr": 24.86209700699686,
+    "sugar_recorded_psnr": 24.86373519897461
+  },
+  {
+    "index": 7,
+    "image": "IMG_000066",
+    "drop": 5.987689971923828,
+    "3dgs_png_psnr": 26.26478442529031,
+    "3dgs_recorded_psnr": 26.267261505126953,
+    "sugar_png_psnr": 20.27902794895732,
+    "sugar_recorded_psnr": 20.279571533203125
+  },
+  {
+    "index": 8,
+    "image": "IMG_000074",
+    "drop": 1.37969970703125,
+    "3dgs_png_psnr": 29.59691566559083,
+    "3dgs_recorded_psnr": 29.601787567138672,
+    "sugar_png_psnr": 28.21837908998235,
+    "sugar_recorded_psnr": 28.222087860107422
+  },
+  {
+    "index": 9,
+    "image": "IMG_000082",
+    "drop": 1.3161792755126953,
+    "3dgs_png_psnr": 26.868626574973856,
+    "3dgs_recorded_psnr": 26.871206283569336,
+    "sugar_png_psnr": 25.55294728904707,
+    "sugar_recorded_psnr": 25.55502700805664
+  },
+  {
+    "index": 10,
+    "image": "IMG_000090",
+    "drop": 1.2804889678955078,
+    "3dgs_png_psnr": 27.137298912147394,
+    "3dgs_recorded_psnr": 27.14010238647461,
+    "sugar_png_psnr": 25.857540758735865,
+    "sugar_recorded_psnr": 25.8596134185791
+  },
+  {
+    "index": 11,
+    "image": "IMG_000098",
+    "drop": 0.5135631561279297,
+    "3dgs_png_psnr": 23.038957959269233,
+    "3dgs_recorded_psnr": 23.040151596069336,
+    "sugar_png_psnr": 22.525401386972945,
+    "sugar_recorded_psnr": 22.526588439941406
+  },
+  {
+    "index": 12,
+    "image": "IMG_000106",
+    "drop": 1.8160362243652344,
+    "3dgs_png_psnr": 23.368525477769097,
+    "3dgs_recorded_psnr": 23.369800567626953,
+    "sugar_png_psnr": 21.552928660214423,
+    "sugar_recorded_psnr": 21.55376434326172
+  },
+  {
+    "index": 13,
+    "image": "IMG_000114",
+    "drop": 2.582111358642578,
+    "3dgs_png_psnr": 28.57332497553142,
+    "3dgs_recorded_psnr": 28.57744026184082,
+    "sugar_png_psnr": 25.99310636407624,
+    "sugar_recorded_psnr": 25.995328903198242
+  },
+  {
+    "index": 14,
+    "image": "IMG_000122",
+    "drop": 2.7503395080566406,
+    "3dgs_png_psnr": 28.47912372002539,
+    "3dgs_recorded_psnr": 28.482872009277344,
+    "sugar_png_psnr": 25.730457507513552,
+    "sugar_recorded_psnr": 25.732532501220703
+  },
+  {
+    "index": 15,
+    "image": "IMG_000130",
+    "drop": 5.032390594482422,
+    "3dgs_png_psnr": 28.312710383934565,
+    "3dgs_recorded_psnr": 28.316308975219727,
+    "sugar_png_psnr": 23.282732911962288,
+    "sugar_recorded_psnr": 23.283918380737305
+  },
+  {
+    "index": 16,
+    "image": "IMG_000140",
+    "drop": 4.737644195556641,
+    "3dgs_png_psnr": 27.990920816094,
+    "3dgs_recorded_psnr": 27.994497299194336,
+    "sugar_png_psnr": 23.25574851699113,
+    "sugar_recorded_psnr": 23.256853103637695
+  },
+  {
+    "index": 17,
+    "image": "IMG_000148",
+    "drop": 5.717876434326172,
+    "3dgs_png_psnr": 26.201400017834718,
+    "3dgs_recorded_psnr": 26.203693389892578,
+    "sugar_png_psnr": 20.485144177975435,
+    "sugar_recorded_psnr": 20.485816955566406
+  },
+  {
+    "index": 18,
+    "image": "IMG_000156",
+    "drop": 0.8908424377441406,
+    "3dgs_png_psnr": 23.915376980371956,
+    "3dgs_recorded_psnr": 23.916778564453125,
+    "sugar_png_psnr": 23.02476674565845,
+    "sugar_recorded_psnr": 23.025936126708984
+  },
+  {
+    "index": 19,
+    "image": "IMG_000164",
+    "drop": 1.5839920043945312,
+    "3dgs_png_psnr": 21.385733743076933,
+    "3dgs_recorded_psnr": 21.386472702026367,
+    "sugar_png_psnr": 19.801975544310185,
+    "sugar_recorded_psnr": 19.802480697631836
+  },
+  {
+    "index": 20,
+    "image": "IMG_000172",
+    "drop": 1.4233570098876953,
+    "3dgs_png_psnr": 21.000372264756916,
+    "3dgs_recorded_psnr": 21.00110626220703,
+    "sugar_png_psnr": 19.577234292535596,
+    "sugar_recorded_psnr": 19.577749252319336
+  },
+  {
+    "index": 21,
+    "image": "IMG_000180",
+    "drop": 1.3449344635009766,
+    "3dgs_png_psnr": 22.257112670973957,
+    "3dgs_recorded_psnr": 22.258005142211914,
+    "sugar_png_psnr": 20.91233245180596,
+    "sugar_recorded_psnr": 20.913070678710938
+  },
+  {
+    "index": 22,
+    "image": "IMG_000188",
+    "drop": 4.670324325561523,
+    "3dgs_png_psnr": 24.022154096891907,
+    "3dgs_recorded_psnr": 24.023624420166016,
+    "sugar_png_psnr": 19.352813525021293,
+    "sugar_recorded_psnr": 19.353300094604492
+  },
+  {
+    "index": 23,
+    "image": "IMG_000196",
+    "drop": 3.769723892211914,
+    "3dgs_png_psnr": 26.592777147203982,
+    "3dgs_recorded_psnr": 26.595335006713867,
+    "sugar_png_psnr": 22.824485858420246,
+    "sugar_recorded_psnr": 22.825611114501953
+  },
+  {
+    "index": 24,
+    "image": "IMG_000204",
+    "drop": 2.789682388305664,
+    "3dgs_png_psnr": 24.681004710802924,
+    "3dgs_recorded_psnr": 24.68257713317871,
+    "sugar_png_psnr": 21.892102462648957,
+    "sugar_recorded_psnr": 21.892894744873047
+  },
+  {
+    "index": 25,
+    "image": "IMG_000214",
+    "drop": 4.520200729370117,
+    "3dgs_png_psnr": 28.384893445080763,
+    "3dgs_recorded_psnr": 28.38872718811035,
+    "sugar_png_psnr": 23.86721182293138,
+    "sugar_recorded_psnr": 23.868526458740234
+  },
+  {
+    "index": 26,
+    "image": "IMG_000222",
+    "drop": 5.367584228515625,
+    "3dgs_png_psnr": 25.70456681714283,
+    "3dgs_recorded_psnr": 25.70656967163086,
+    "sugar_png_psnr": 20.338336852904856,
+    "sugar_recorded_psnr": 20.338985443115234
+  },
+  {
+    "index": 27,
+    "image": "IMG_000230",
+    "drop": 2.4717864990234375,
+    "3dgs_png_psnr": 26.102831626304148,
+    "3dgs_recorded_psnr": 26.105022430419922,
+    "sugar_png_psnr": 23.631829562649862,
+    "sugar_recorded_psnr": 23.633235931396484
+  },
+  {
+    "index": 28,
+    "image": "IMG_000238",
+    "drop": 1.0770587921142578,
+    "3dgs_png_psnr": 23.789335384992945,
+    "3dgs_recorded_psnr": 23.790584564208984,
+    "sugar_png_psnr": 22.712452397161073,
+    "sugar_recorded_psnr": 22.713525772094727
+  },
+  {
+    "index": 29,
+    "image": "IMG_000246",
+    "drop": 2.2455806732177734,
+    "3dgs_png_psnr": 25.706893341074277,
+    "3dgs_recorded_psnr": 25.708953857421875,
+    "sugar_png_psnr": 23.462098399597274,
+    "sugar_recorded_psnr": 23.4633731842041
+  },
+  {
+    "index": 30,
+    "image": "IMG_000254",
+    "drop": 5.4871063232421875,
+    "3dgs_png_psnr": 27.452029193747443,
+    "3dgs_recorded_psnr": 27.454927444458008,
+    "sugar_png_psnr": 21.96695428900582,
+    "sugar_recorded_psnr": 21.96782112121582
+  },
+  {
+    "index": 31,
+    "image": "IMG_000263",
+    "drop": 5.446645736694336,
+    "3dgs_png_psnr": 26.743569675456875,
+    "3dgs_recorded_psnr": 26.74614143371582,
+    "sugar_png_psnr": 21.29866113031185,
+    "sugar_recorded_psnr": 21.299495697021484
+  },
+  {
+    "index": 32,
+    "image": "IMG_000273",
+    "drop": 2.888427734375,
+    "3dgs_png_psnr": 27.848584183755385,
+    "3dgs_recorded_psnr": 27.851879119873047,
+    "sugar_png_psnr": 24.961686320930134,
+    "sugar_recorded_psnr": 24.963451385498047
+  },
+  {
+    "index": 33,
+    "image": "IMG_000281",
+    "drop": 2.4471378326416016,
+    "3dgs_png_psnr": 29.27052421288729,
+    "3dgs_recorded_psnr": 29.27520751953125,
+    "sugar_png_psnr": 26.825606702238254,
+    "sugar_recorded_psnr": 26.82806968688965
+  },
+  {
+    "index": 34,
+    "image": "IMG_000289",
+    "drop": 1.3727951049804688,
+    "3dgs_png_psnr": 29.012940017761572,
+    "3dgs_recorded_psnr": 29.017393112182617,
+    "sugar_png_psnr": 27.64156195331411,
+    "sugar_recorded_psnr": 27.64459800720215
+  },
+  {
+    "index": 35,
+    "image": "IMG_000297",
+    "drop": 1.9878730773925781,
+    "3dgs_png_psnr": 28.484088661433518,
+    "3dgs_recorded_psnr": 28.488100051879883,
+    "sugar_png_psnr": 26.497709828339758,
+    "sugar_recorded_psnr": 26.500226974487305
+  },
+  {
+    "index": 36,
+    "image": "IMG_000305",
+    "drop": 3.3791847229003906,
+    "3dgs_png_psnr": 30.316201262217323,
+    "3dgs_recorded_psnr": 30.322280883789062,
+    "sugar_png_psnr": 26.94033558138969,
+    "sugar_recorded_psnr": 26.943096160888672
+  },
+  {
+    "index": 37,
+    "image": "IMG_000313",
+    "drop": 2.862222671508789,
+    "3dgs_png_psnr": 29.129192062030228,
+    "3dgs_recorded_psnr": 29.133930206298828,
+    "sugar_png_psnr": 26.269356641068704,
+    "sugar_recorded_psnr": 26.27170753479004
+  },
+  {
+    "index": 38,
+    "image": "IMG_000321",
+    "drop": 1.372222900390625,
+    "3dgs_png_psnr": 28.313783825415836,
+    "3dgs_recorded_psnr": 28.3174991607666,
+    "sugar_png_psnr": 26.94273633152324,
+    "sugar_recorded_psnr": 26.945276260375977
+  },
+  {
+    "index": 39,
+    "image": "IMG_000329",
+    "drop": 1.7562141418457031,
+    "3dgs_png_psnr": 29.524303474622865,
+    "3dgs_recorded_psnr": 29.529510498046875,
+    "sugar_png_psnr": 27.769817927195252,
+    "sugar_recorded_psnr": 27.773296356201172
+  },
+  {
+    "index": 40,
+    "image": "IMG_000337",
+    "drop": 3.422527313232422,
+    "3dgs_png_psnr": 28.08552037327937,
+    "3dgs_recorded_psnr": 28.08926010131836,
+    "sugar_png_psnr": 24.66510000769954,
+    "sugar_recorded_psnr": 24.666732788085938
+  },
+  {
+    "index": 41,
+    "image": "IMG_000345",
+    "drop": -0.5516223907470703,
+    "3dgs_png_psnr": 21.544683677480055,
+    "3dgs_recorded_psnr": 21.545509338378906,
+    "sugar_png_psnr": 22.096162163734803,
+    "sugar_recorded_psnr": 22.097131729125977
+  },
+  {
+    "index": 42,
+    "image": "IMG_000353",
+    "drop": 5.599296569824219,
+    "3dgs_png_psnr": 30.995963281182433,
+    "3dgs_recorded_psnr": 31.00278663635254,
+    "sugar_png_psnr": 25.401660190829368,
+    "sugar_recorded_psnr": 25.40349006652832
+  },
+  {
+    "index": 43,
+    "image": "IMG_000361",
+    "drop": 5.511619567871094,
+    "3dgs_png_psnr": 25.49860819322547,
+    "3dgs_recorded_psnr": 25.500457763671875,
+    "sugar_png_psnr": 19.988248363618776,
+    "sugar_recorded_psnr": 19.98883819580078
+  },
+  {
+    "index": 44,
+    "image": "IMG_000369",
+    "drop": 2.4363460540771484,
+    "3dgs_png_psnr": 24.51929656064153,
+    "3dgs_recorded_psnr": 24.520954132080078,
+    "sugar_png_psnr": 22.08362233471413,
+    "sugar_recorded_psnr": 22.08460807800293
+  },
+  {
+    "index": 45,
+    "image": "IMG_000377",
+    "drop": 2.3303756713867188,
+    "3dgs_png_psnr": 22.965987351045626,
+    "3dgs_recorded_psnr": 22.966995239257812,
+    "sugar_png_psnr": 20.636027445585206,
+    "sugar_recorded_psnr": 20.636619567871094
+  },
+  {
+    "index": 46,
+    "image": "IMG_000385",
+    "drop": 2.0003890991210938,
+    "3dgs_png_psnr": 23.04779176897091,
+    "3dgs_recorded_psnr": 23.048919677734375,
+    "sugar_png_psnr": 21.047763206531926,
+    "sugar_recorded_psnr": 21.04853057861328
+  },
+  {
+    "index": 47,
+    "image": "IMG_000393",
+    "drop": 2.474649429321289,
+    "3dgs_png_psnr": 26.182800687397677,
+    "3dgs_recorded_psnr": 26.1850528717041,
+    "sugar_png_psnr": 23.709268351080656,
+    "sugar_recorded_psnr": 23.710403442382812
+  },
+  {
+    "index": 48,
+    "image": "IMG_000401",
+    "drop": 5.743230819702148,
+    "3dgs_png_psnr": 26.02864308469902,
+    "3dgs_recorded_psnr": 26.030773162841797,
+    "sugar_png_psnr": 20.28694633943509,
+    "sugar_recorded_psnr": 20.28754234313965
+  },
+  {
+    "index": 49,
+    "image": "IMG_000409",
+    "drop": 4.278261184692383,
+    "3dgs_png_psnr": 27.752366265841832,
+    "3dgs_recorded_psnr": 27.755699157714844,
+    "sugar_png_psnr": 23.476255957666933,
+    "sugar_recorded_psnr": 23.47743797302246
+  },
+  {
+    "index": 50,
+    "image": "IMG_000417",
+    "drop": -0.04339027404785156,
+    "3dgs_png_psnr": 22.595444786263776,
+    "3dgs_recorded_psnr": 22.596477508544922,
+    "sugar_png_psnr": 22.638814990174282,
+    "sugar_recorded_psnr": 22.639867782592773
+  },
+  {
+    "index": 51,
+    "image": "IMG_000425",
+    "drop": 1.6956501007080078,
+    "3dgs_png_psnr": 26.253794838945353,
+    "3dgs_recorded_psnr": 26.256200790405273,
+    "sugar_png_psnr": 24.559009975063436,
+    "sugar_recorded_psnr": 24.560550689697266
+  },
+  {
+    "index": 52,
+    "image": "IMG_000433",
+    "drop": 2.0524768829345703,
+    "3dgs_png_psnr": 23.523000221707484,
+    "3dgs_recorded_psnr": 23.52417755126953,
+    "sugar_png_psnr": 21.471053606121306,
+    "sugar_recorded_psnr": 21.47170066833496
+  },
+  {
+    "index": 53,
+    "image": "IMG_000441",
+    "drop": 3.2439098358154297,
+    "3dgs_png_psnr": 28.80735252712737,
+    "3dgs_recorded_psnr": 28.811738967895508,
+    "sugar_png_psnr": 25.56587982275684,
+    "sugar_recorded_psnr": 25.567829132080078
+  },
+  {
+    "index": 54,
+    "image": "IMG_000449",
+    "drop": 3.9445228576660156,
+    "3dgs_png_psnr": 25.54539145371767,
+    "3dgs_recorded_psnr": 25.547290802001953,
+    "sugar_png_psnr": 21.602036959554486,
+    "sugar_recorded_psnr": 21.602767944335938
+  }
+]

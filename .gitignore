@@ -151,3 +151,13 @@ dmypy.json
 # Pyre type checker
 .pyre/
 learnableearthparser/fast_sampler/_sampler.c
+
+# Display names are local dataset metadata, preserved when updating project code.
+/datasets/model_names.json
+/datasets/model_names.tmp
+/datasets/geometry_scales.json
+/datasets/geometry_scales.tmp
+
+datasets/geometry_settings.json
+
+datasets/geometry_settings.tmp

@@ -11,7 +11,7 @@ from pipeline_tools.dataset_registry import (CATALOG, has_checkpoint, has_colmap
                                            has_data, has_sugar_result, media_files,
                                            scene_pairs, VIDEO_EXTENSIONS, has_evaluation)
 from pipeline_tools.run_settings import (add_resolution_arguments, resolution_settings,
-    colmap_matches, training_matches, evaluation_matches, colmap_settings,
+    training_matches, evaluation_matches, colmap_settings,
     add_colmap_arguments, colmap_arguments, sugar_settings, sugar_arguments)
 
 
@@ -35,6 +35,11 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
     sfm_settings = colmap_settings(dict(colmap_device=colmap_device or ('cuda' if use_gpu_colmap else 'cpu'),
         colmap_matcher=colmap_matcher, colmap_max_features=colmap_max_features,
         colmap_sequential_overlap=colmap_sequential_overlap))
+    # Explicit start point: never fall back to COLMAP or frame extraction when
+    # an imported reconstruction is missing/incomplete, even with resume=False.
+    if skip_colmap and not has_colmap_model(scene_dir):
+        raise RuntimeError('Mulai dari COLMAP memerlukan images/ hasil undistorsi dan '
+                           'sparse/0/{cameras,images,points3D} yang lengkap. COLMAP tidak dijalankan ulang.')
     if not has_data(scene_dir):
         print(f"[SKIP] {statue_class}/{model_id}: belum ada foto/video.", flush=True)
         return "SKIPPED"
@@ -48,17 +53,24 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
         if not media_files(scene_dir / "input"):
             raise RuntimeError("Tidak ada frame yang lolos filter ketajaman.")
     if skip_colmap:
-        if not colmap_matches(scene_dir, colmap_max_image_size, sfm_settings):
-            raise RuntimeError("--skip_colmap aktif tetapi model COLMAP belum lengkap.")
-    elif not (resume and colmap_matches(scene_dir, colmap_max_image_size, sfm_settings)):
+        print('[INFO] Memakai hasil COLMAP yang sudah ada; langsung ke training 3DGS. '
+              'Pengaturan ekstraksi/pencocokan COLMAP saat ini tidak diterapkan ke hasil impor.', flush=True)
+    elif resume and has_colmap_model(scene_dir):
+        # A ready reconstruction is the starting point, including imports from
+        # another computer without a local settings receipt. Do not rebuild SfM
+        # on retry: that would invalidate the training recovery fingerprints.
+        print('[RESUME] Hasil COLMAP lengkap ditemukan; memakai images/ dan sparse/0 '
+              'yang sudah ada tanpa menjalankan COLMAP ulang. Pengaturan COLMAP '
+              'hanya diterapkan saat menghitung COLMAP baru.', flush=True)
+    else:
         run_stage("02_run_colmap.py", ["-s", scene_dir, *common, '--gpu', gpu,
                   '--colmap_max_image_size', colmap_max_image_size,
                   *colmap_arguments(sfm_settings)], root)
     if not has_colmap_model(scene_dir):
         raise RuntimeError("Model COLMAP atau images/ hasil undistorsi tidak lengkap.")
-    if not (scene_dir / 'colmap_settings.json').is_file():
-        print('[INFO] Model COLMAP lama/impor dipakai kembali; resolusi SfM-nya belum tercatat. '
-              'Nonaktifkan Lewati tahap jika ingin menghitung ulang dengan batas COLMAP yang dipilih.', flush=True)
+    if not skip_colmap and not (scene_dir / 'colmap_settings.json').is_file():
+        print('[INFO] Resolusi/pengaturan SfM hasil lama atau impor belum tercatat. '
+              'Untuk menghitung ulang SfM, pilih COLMAP saja atau nonaktifkan pemulihan tahap.', flush=True)
     trained_3dgs = False
     if skip_3dgs:
         if not (has_checkpoint(out_3dgs, 7000) and has_checkpoint(out_3dgs, 30000)
@@ -66,8 +78,11 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
             raise RuntimeError("--skip_3dgs memerlukan checkpoint 7000 dan 30000 yang lengkap.")
     elif not (resume and has_checkpoint(out_3dgs, 7000) and has_checkpoint(out_3dgs, 30000)
               and training_matches(out_3dgs, scene_dir, image_downscale, image_max_size)):
-        run_stage("03_train_3dgs.py", ["-s", scene_dir, *common, "--gpu", gpu, *image_args], root)
+        run_stage("03_train_3dgs.py", ["-s", scene_dir, *common, "--gpu", gpu, *image_args,
+                  *([] if resume else ['--no_resume'])], root)
         trained_3dgs = True
+    else:
+        print('[RESUME] Training 3DGS sudah lengkap dan konfigurasinya cocok; dilewati.', flush=True)
     trained_sugar = False
     sugar_matches = False
     if has_sugar_result(out_sugar):
@@ -78,8 +93,11 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          and config.get('image_downscale') == image_downscale and config.get('image_max_size') == image_max_size)
     if not skip_sugar and not (resume and not trained_3dgs and sugar_matches):
         run_stage("04_train_sugar.py", ["-s", scene_dir, "-c", out_3dgs, *common,
-                  "--gpu", gpu, *sugar_arguments(sugar_config), *image_args], root)
+                  "--gpu", gpu, *sugar_arguments(sugar_config), *image_args,
+                  *([] if resume else ['--no_resume'])], root)
         trained_sugar = True
+    elif not skip_sugar:
+        print('[RESUME] Hasil SuGaR sudah lengkap dan konfigurasinya cocok; dilewati.', flush=True)
     if not skip_evaluation:
         for method, output, retrained in (("3DGS", out_3dgs, trained_3dgs), ("SuGaR", out_sugar, trained_sugar)):
             if method == "SuGaR" and skip_sugar:
@@ -87,6 +105,8 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
             if not (resume and not retrained and has_evaluation(output)
                     and evaluation_matches(output, image_downscale, image_max_size)):
                 run_stage("06_evaluate_rendering.py", [*common, "--method", method, "--gpu", gpu, *image_args], root)
+            else:
+                print(f'[RESUME] Evaluasi visual {method} sudah lengkap dan cocok; dilewati.', flush=True)
     return "COMPLETED"
 
 

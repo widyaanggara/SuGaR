@@ -67,12 +67,26 @@
     .model-name-dialog{width:min(460px,calc(100vw - 32px));max-height:90vh;overflow:auto;margin:auto;padding:24px;border:1px solid var(--border);border-radius:14px;background:#fff;color:var(--text-1);box-shadow:0 20px 65px #0003}.model-name-dialog::backdrop{background:#0008}.model-name-dialog h2{font-size:19px;line-height:1.5;margin:0 0 5px}.model-name-target{font-size:11px;color:var(--text-3);margin-bottom:20px}.model-name-dialog label{display:grid;gap:8px;font-size:12px;font-weight:500}.model-name-dialog input{width:100%;box-sizing:border-box;padding:11px 12px;font:inherit;line-height:1.6;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--text-1)}.model-name-help{font-size:11px;color:var(--text-2);line-height:1.8;margin:12px 0}.model-name-error{min-height:1.6em;font-size:11px;line-height:1.6;color:#a62c21;margin:0 0 12px}.model-name-actions{display:flex;justify-content:flex-end;gap:8px}
     .queue-section .table-wrap{max-height:min(420px,60vh);overflow:auto;overscroll-behavior-y:contain;scrollbar-width:thin;scrollbar-color:#c8c1bf transparent}.queue-section thead th{position:sticky;top:0;z-index:1;box-shadow:0 1px 0 var(--border)}.preview-notice{margin:0 0 22px}
     @media(max-width:850px){.dataset-actions{gap:8px}.dataset-actions .btn{padding:12px}.dataset-actions small{font-size:9px}}
-    .metric-experiment-tabs{display:flex;gap:6px;padding:0 20px 16px;flex-wrap:wrap}
-    .metric-experiment-tabs button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-    #metricsBody .metric-group-tinted td{background:rgba(164,42,32,.055)}
-    #metricsBody .metric-group-tinted:hover td{background:rgba(164,42,32,.09)}
+    /* Evaluation results: neutral model groups and an inset experiment switch. */
+    #results .table-head{border-bottom:0;padding:24px 24px 0}
+    #results .section-subtitle{margin-top:4px;line-height:1.7}
+    .metric-experiment-tabs{display:inline-flex;gap:4px;margin:20px 24px 22px;padding:4px;background:#f1f3f5;border:1px solid #e6e9ec;border-radius:10px;max-width:calc(100% - 48px)}
+    .metric-experiment-tabs .btn{min-height:34px;padding:7px 18px;border:1px solid transparent;border-radius:7px;background:transparent;color:#66707b;font-size:12px;font-weight:550;box-shadow:none}
+    .metric-experiment-tabs .btn:hover{background:#e8ebef;color:#303740;border-color:transparent}
+    .metric-experiment-tabs .btn[aria-pressed="true"]{background:#fff;border-color:#e2e5e9;color:var(--accent);box-shadow:0 1px 3px #2430420d;font-weight:650}
+    #results .table-wrap{border-top:1px solid #e6e9ec}
+    #results th{background:#f8f9fa;color:#64707c;text-transform:none;letter-spacing:0;font-size:10px;font-weight:600;padding:13px 20px;border-bottom:1px solid #e6e9ec}
+    #metricsBody td{padding:15px 20px;border-top:1px solid #eef0f2;font-size:11px;color:#38414a;line-height:1.7}
+    #metricsBody .metric-group-tinted td{background:#f6f7f9}
     #metricsBody .metric-group-plain td{background:#fff}
-    #metricsBody .metric-group-plain:hover td{background:#fafafa}
+    #metricsBody tr:hover td{background:#edf1f5}
+    #metricsBody .metric-group-start:not(:first-child) td{border-top:1px solid #dbe1e7}
+    #metricsBody td:first-child{color:#7b8490;font-size:10px;font-variant-numeric:tabular-nums}
+    #metricsBody .model-title{font-weight:600;color:#303740}
+    #metricsBody .model-reference{color:#7b8490;margin-top:3px}
+    #results th:nth-child(n+5),#metricsBody td:nth-child(n+5){text-align:right;font-variant-numeric:tabular-nums}
+    #metricsBody td:nth-child(4){font-weight:600;color:#52606e}
+    @media(max-width:560px){#results .table-head{padding:18px 16px 0}.metric-experiment-tabs{margin:16px;max-width:calc(100% - 32px)}.metric-experiment-tabs .btn{padding-inline:14px}#results th,#metricsBody td{padding-inline:16px}}
   </style>
   <style id="queueStyles">
 /* Queue composer: fixed header/footer, one scrollable body, clear research steps. */
@@ -117,8 +131,6 @@
 [hidden]{display:none!important}
 @media(max-width:600px){.queue-dialog{width:calc(100vw - 20px);border-radius:13px}.queue-dialog{max-height:94dvh}.queue-dialog-head,.queue-dialog-content,.queue-dialog-footer{padding:18px}.queue-dialog-head h2{font-size:19px}.queue-heading-icon{width:36px;height:36px}.queue-target-fields{grid-template-columns:1fr;padding:12px;gap:10px}.process-options,.process-options[data-scope=bulk]{grid-template-columns:1fr}.process-options[data-scope=bulk] .process-option{flex-wrap:nowrap}.process-options[data-scope=bulk] .process-option>span:not(.process-check){flex-basis:auto;order:0}.process-option{min-height:70px;padding:13px}.queue-dialog-footer{flex-wrap:wrap;gap:12px;padding-block:12px}.queue-dialog-footer .table-actions{width:100%;justify-content:flex-end}.queue-dialog-footer .btn-primary{flex:1}.queue-method-options{max-width:none}}
 @media(prefers-reduced-motion:reduce){.process-option{transition:none}}
-    .metric-experiment-tabs{display:flex;gap:6px;padding:0 20px 16px;flex-wrap:wrap}
-    .metric-experiment-tabs button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
   </style>
 </head>
 <body>

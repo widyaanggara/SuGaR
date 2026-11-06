@@ -815,12 +815,12 @@ function renderMetrics() {
   }
   const display = [...modelGroups.values()].flatMap((rows, groupIndex) =>
     rows.sort((a, b) => ['3DGS', 'SuGaR'].indexOf(a.Metode) - ['3DGS', 'SuGaR'].indexOf(b.Metode))
-      .map(row => ({...row, shadedGroup: groupIndex % 2 === 0})));
+      .map((row, rowIndex) => ({...row, shadedGroup: groupIndex % 2 === 0, groupStart: rowIndex === 0})));
 
   const precision = `Precision @${threshold}cm (%)`, recall = `Recall @${threshold}cm (%)`, f1 = `F1 @${threshold}cm (%)`;
   const columns = ['Timestamp', 'Kelas', 'Model ID', 'Metode', 'PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
     precision, recall, f1, 'Peak VRAM (GB)', 'Total Waktu (Menit)'];
-  $('metricsBody').innerHTML = display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
+  $('metricsBody').innerHTML = display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}${row.groupStart ? ' metric-group-start' : ''}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
   for (const [column, target, context, unit, digits, explanation] of [
     ['PSNR (dB)', 'kpiPsnr', 'psnrContext', ' dB', 2, '↑'],
     ['SSIM', 'kpiSsim', 'ssimContext', '', 4, '↑'],

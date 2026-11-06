@@ -636,3 +636,39 @@ test('polling keeps the actual Log button stable so clicks are not lost while a 
   await button.onclick();
   assert.equal(app.nodes.get('jobLogDialog').open, true);
 });
+
+
+test('evaluation tabs isolate baseline and Scaffold while keeping method labels and columns unchanged', async () => {
+  const app = page();
+  const base = {Kelas: 'Dewa', 'Model ID': 'model_01', Status: 'COMPLETED'};
+  app.setMetrics([
+    {...base, Metode: '3DGS', 'PSNR (dB)': '20', 'Chamfer Dist (cm)': '1'},
+    {...base, Metode: 'SuGaR', 'PSNR (dB)': '30'},
+    {...base, Metode: '3DGS_scaffold_anchor', 'PSNR (dB)': '40'},
+    {...base, Metode: 'SuGaR_scaffold_anchor', 'PSNR (dB)': '50'},
+    {...base, Metode: 'SuGaR_scaffold_anchor', 'PSNR (dB)': '999', Status: 'FAILED'}
+  ]);
+  await vm.runInContext('refreshMetrics()', app.context);
+  assert.equal(app.nodes.get('kpiPsnr').textContent, '25.00 dB');
+  vm.runInContext("setMetricExperiment('scaffold_anchor')", app.context);
+  assert.equal(app.nodes.get('kpiPsnr').textContent, '45.00 dB');
+  assert.doesNotMatch(app.nodes.get('metricsBody').innerHTML, /scaffold_anchor/);
+  assert.match(app.nodes.get('metricsBody').innerHTML, /3DGS/);
+  assert.match(app.nodes.get('metricsBody').innerHTML, /SuGaR/);
+  assert.equal(app.nodes.get('metricsAblation').attributes['aria-pressed'], 'true');
+  assert.equal(app.nodes.get('kpiChamfer').textContent, '\u2014');
+  app.nodes.get('metricMethod').value = '3DGS';
+  vm.runInContext('renderMetrics()', app.context);
+  assert.equal(app.nodes.get('kpiPsnr').textContent, '40.00 dB');
+  let exported;
+  app.context.window.open = url => {exported = url;};
+  vm.runInContext('exportCSV()', app.context);
+  assert.equal(exported, '/api/metrics.csv?experiment=scaffold_anchor&method=3DGS');
+  vm.runInContext("setMetricExperiment('baseline')", app.context);
+  assert.equal(app.nodes.get('kpiPsnr').textContent, '20.00 dB');
+  app.setMetrics([{...base, Metode: '3DGS', 'PSNR (dB)': '20'}]);
+  await vm.runInContext('refreshMetrics()', app.context);
+  vm.runInContext("setMetricExperiment('scaffold_anchor')", app.context);
+  assert.match(app.nodes.get('metricsBody').innerHTML, /Belum ada hasil evaluasi/);
+  assert.equal(app.nodes.get('kpiPsnr').textContent, '\u2014');
+});

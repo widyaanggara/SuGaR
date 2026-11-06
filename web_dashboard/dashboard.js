@@ -8,6 +8,8 @@ let selectedLogLoading = false;
 let lastQueueSignature = null;
 let lastGridSignature = null;
 let cachedMetrics = [];
+let metricExperiment = 'baseline';
+const metricMethods = {baseline: ['3DGS', 'SuGaR'], scaffold_anchor: ['3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor']};
 let editingModel = null;
 let modelNameSaving = false;
 let queueSelection = null;
@@ -771,7 +773,7 @@ async function copyLogs() {
 
 async function refreshMetrics() {
   try {
-    const rows = (await api('/api/metrics')).filter(row => row['Metode'] === '3DGS' || row['Metode'] === 'SuGaR');
+    const rows = (await api('/api/metrics')).filter(row => Object.values(metricMethods).flat().includes(row.Metode));
     const latest = new Map();
     for (const row of rows) {
       if (row.Status !== 'COMPLETED') continue;
@@ -790,10 +792,21 @@ async function refreshMetrics() {
   } catch (error) { console.error(error); }
 }
 
+function setMetricExperiment(experiment) {
+  if (!Object.hasOwn(metricMethods, experiment)) return;
+  metricExperiment = experiment;
+  for (const [id, value] of [['metricsBaseline', 'baseline'], ['metricsAblation', 'scaffold_anchor']]) {
+    $(id).setAttribute('aria-pressed', String(value === experiment));
+  }
+  renderMetrics();
+}
+
 function renderMetrics() {
   const method = $('metricMethod').value || 'all';
   const threshold = $('geometryThreshold').value === '5' ? 5 : 2;
-  const display = cachedMetrics.filter(row => method === 'all' || row.Metode === method);
+  const display = cachedMetrics.filter(row => metricMethods[metricExperiment].includes(row.Metode))
+    .map(row => ({...row, Metode: row.Metode.replace('_scaffold_anchor', '')}))
+    .filter(row => method === 'all' || row.Metode === method);
   const precision = `Precision @${threshold}cm (%)`, recall = `Recall @${threshold}cm (%)`, f1 = `F1 @${threshold}cm (%)`;
   const columns = ['Timestamp', 'Kelas', 'Model ID', 'Metode', 'PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
     precision, recall, f1, 'Peak VRAM (GB)', 'Total Waktu (Menit)'];
@@ -810,14 +823,14 @@ function renderMetrics() {
     $(target).textContent = values.length ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(digits) + unit : '—';
     $(context).textContent = `${values.length ? 'Rata-rata ' + values.length + ' hasil' : 'Belum dievaluasi'} · ${explanation}`;
   }
-  $('metricScope').textContent = `Rata-rata hasil terakhir per model/metode · ${method === 'all' ? '3DGS + SuGaR' : method}. Model selesai menghitung pipeline kedua metode. Geometri memerlukan LiDAR.`;
+  $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${method === 'all' ? '3DGS + SuGaR' : method}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri ablasi belum tersedia melalui dashboard.'}`;
   for (const [id, label] of [['precisionHeader', 'Precision'], ['recallHeader', 'Recall'], ['f1Header', 'F1']]) {
     $(id).textContent = `${label} @${threshold}cm (%)`;
   }
 }
 function exportCSV() {
   if (isFilePreview) { showToast(previewMessage); return; }
-  window.open('/api/metrics.csv', '_blank');
+  window.open('/api/metrics.csv?experiment=' + metricExperiment + '&method=' + encodeURIComponent($('metricMethod').value || 'all'), '_blank');
 }
 function showToast(message) {
   $('toast').textContent = message;

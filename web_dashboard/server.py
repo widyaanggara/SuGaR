@@ -8,7 +8,7 @@ import subprocess
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -384,6 +384,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Perubahan tidak dapat disimpan. Periksa izin dan ruang penyimpanan server."}, 500)
 
     def send_metrics_csv(self):
+        query = parse_qs(urlparse(self.path).query)
+        experiment = query.get('experiment', ['all'])[0]
+        method = query.get('method', ['all'])[0]
+        if experiment not in ('all', 'baseline', 'scaffold_anchor') or method not in ('all', '3DGS', 'SuGaR'):
+            self.send_json({'error': 'Filter evaluasi tidak valid.'}, 400)
+            return
         path = self.root / 'outputs/logs/evaluation_reports/summary_comparison.csv'
         if not path.is_file():
             self.send_error(404)
@@ -396,13 +402,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
         writer = csv.DictWriter(text, fieldnames=fields)
         writer.writeheader()
         for row in get_metrics_table(self.root):
+            row_method = row.get('Metode', '')
+            allowed = {'baseline': ('3DGS', 'SuGaR'),
+                       'scaffold_anchor': ('3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor')}
+            if experiment != 'all' and row_method not in allowed[experiment]:
+                continue
+            if method != 'all' and row_method not in (method, method + '_scaffold_anchor'):
+                continue
             if row['Nama Model'].startswith(('=', '+', '-', '@')):
                 row['Nama Model'] = "'" + row['Nama Model']
             writer.writerow(row)
         payload = text.getvalue().encode('utf-8-sig')
         self.send_response(200)
         self.send_header('Content-Type', 'text/csv; charset=utf-8')
-        self.send_header('Content-Disposition', 'attachment; filename="summary_comparison.csv"')
+        filename = 'summary_comparison.csv' if experiment == 'all' else f'summary_{experiment}.csv'
+        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         self.send_header('Content-Length', str(len(payload)))
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()

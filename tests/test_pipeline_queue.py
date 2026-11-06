@@ -472,7 +472,7 @@ class HttpTests(unittest.TestCase):
             initialize_workspace(root)
             for cls, mdl in scene_pairs():
                 write(root / 'datasets' / cls / mdl / 'input/a.JPG')
-            write(root / 'outputs/logs/evaluation_reports/summary_comparison.csv', 'Kelas,Metode\nDewa,SuGaR\n')
+            write(root / 'outputs/logs/evaluation_reports/summary_comparison.csv', 'Kelas,Metode\nDewa,SuGaR\nDewa,SuGaR_scaffold_anchor\n')
             queue = JobQueue(root, lambda _: [sys.executable, '-c', 'pass'])
             queue.set_paused(True)
             server = HTTPServer(('127.0.0.1', 0), DashboardHandler)
@@ -535,6 +535,16 @@ class HttpTests(unittest.TestCase):
                     csv_data = response.read()
                     self.assertIn(b'Dewa,SuGaR', csv_data)
                     self.assertIn(b'Nama Model', csv_data)
+                with request('/api/metrics.csv?experiment=baseline') as response:
+                    self.assertNotIn(b'scaffold_anchor', response.read())
+                with request('/api/metrics.csv?experiment=scaffold_anchor&method=SuGaR') as response:
+                    csv_data = response.read()
+                    self.assertIn(b'SuGaR_scaffold_anchor', csv_data)
+                    self.assertNotIn(b'Dewa,SuGaR,', csv_data)
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    request('/api/metrics.csv?experiment=invalid')
+                self.assertEqual(error.exception.code, 400)
+                error.exception.close()
                 for body in ({'action': 'execute'}, [], {'class_name': '..'}):
                     with self.assertRaises(urllib.error.HTTPError) as error:
                         request('/api/run', body)

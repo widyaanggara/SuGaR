@@ -11,7 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from pipeline_tools.logger_utils import ThesisLogger
 from pipeline_tools.gpu_lock import gpu_lock
-from pipeline_tools.dataset_registry import has_colmap_model
+from pipeline_tools.dataset_registry import has_colmap_model, file_signature
 from pipeline_tools.run_settings import add_resolution_arguments, resolution_settings, colmap_signature
 from pipeline_tools.recovery_state import configure_recovery, scene_identity, code_identity
 
@@ -27,12 +27,16 @@ def train_vanilla_3dgs(scene_path: str,
                        logger: ThesisLogger = None,
                        image_downscale: int = 1,
                        image_max_size: int = 1600,
-                       resume: bool = True):
+                       resume: bool = True, initial_ply=None):
     """
     Melatih model vanilla 3D Gaussian Splatting baseline.
     Menyimpan checkpoint pada 7.000 iterasi (untuk SuGaR) dan 30.000 iterasi (baseline final).
     """
     scene_path = Path(scene_path).resolve()
+    initialization = None
+    if initial_ply:
+        initial_ply = str(Path(initial_ply).resolve())
+        initialization = {'path': initial_ply, 'signature': file_signature(initial_ply)}
     if not has_colmap_model(scene_path):
         raise FileNotFoundError("COLMAP belum lengkap: perlu images/ dan sparse/0/{cameras,images,points3D}.")
     output_dir = Path(output_dir).resolve()
@@ -43,7 +47,7 @@ def train_vanilla_3dgs(scene_path: str,
     if not train_script.exists():
         raise FileNotFoundError(f"Script pelatihan 3DGS tidak ditemukan di: {train_script}")
     configure_recovery(output_dir / 'recovery/identity.json', {
-        'scene': scene_identity(scene_path), 'iterations': iterations, 'image_downscale': image_downscale,
+        'scene': scene_identity(scene_path), 'initialization': initialization, 'iterations': iterations, 'image_downscale': image_downscale,
         'image_max_size': image_max_size, 'white_background': white_background, 'eval_split': eval_split,
         'code': code_identity(PROJECT_ROOT, ['gaussian_splatting/train.py',
             'gaussian_splatting/scene/gaussian_model.py', 'gaussian_splatting/scene/__init__.py',
@@ -67,6 +71,8 @@ def train_vanilla_3dgs(scene_path: str,
     ]
     if resume:
         cmd.append('--resume_training')
+    if initial_ply:
+        cmd.extend(['--initial_ply', initial_ply])
     if white_background:
         cmd.append("-w")
     if eval_split:
@@ -115,7 +121,7 @@ def train_vanilla_3dgs(scene_path: str,
 
     receipt = {'image_downscale': image_downscale, 'image_max_size': image_max_size,
                'colmap_signature': colmap_signature(scene_path), 'white_background': white_background,
-               'eval_split': eval_split, 'iterations': iterations, 'data_device': 'cpu'}
+               'eval_split': eval_split, 'iterations': iterations, 'data_device': 'cpu', 'initialization': initialization}
     (output_dir / 'training_settings.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
 
     statistics = output_dir / 'run_statistics.json'
@@ -141,6 +147,8 @@ def main():
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU (default: 0).")
     parser.add_argument('--no_resume', action='store_true', help='Mulai training baru tanpa memulihkan checkpoint.')
+    parser.add_argument('--initial_ply', default=None)
+    parser.add_argument('--experiment', choices=['baseline', 'scaffold_anchor'], default='baseline')
     add_resolution_arguments(parser)
 
     args = parser.parse_args()
@@ -150,10 +158,13 @@ def main():
 
     if args.output_dir is None:
         output_dir = PROJECT_ROOT / "outputs" / "3dgs" / args.statue_class / args.model_id
+        if args.experiment != 'baseline':
+            output_dir = PROJECT_ROOT / 'outputs/ablations' / args.experiment / '3dgs' / args.statue_class / args.model_id
     else:
         output_dir = Path(args.output_dir)
 
-    logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id, method="3DGS")
+    logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id,
+                          method="3DGS" if args.experiment == 'baseline' else '3DGS_scaffold_anchor')
     logger.set_parameters({
         "iterations": args.iterations,
         "gpu": args.gpu,
@@ -174,7 +185,7 @@ def main():
                 logger=logger,
                 image_downscale=args.image_downscale,
                 image_max_size=args.image_max_size,
-                resume=not args.no_resume
+                resume=not args.no_resume, initial_ply=args.initial_ply
             )
         logger.finalize(success=True)
     except Exception as e:

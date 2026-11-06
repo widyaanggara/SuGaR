@@ -50,6 +50,7 @@ class ModelParams(ParamGroup):
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
+        self.initial_ply = ""
         self._resolution = -1
         self.image_downscale = 1
         self.image_max_size = -1  # Legacy callers keep the original resolution behaviour.

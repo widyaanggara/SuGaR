@@ -109,6 +109,11 @@ def build_command(job, root=PROJECT_ROOT):
             args.append("--no_resume")
         if job.get('pipeline_start') == 'existing_colmap':
             args.append('--skip_colmap')
+        if job.get('experiment', 'baseline') == 'scaffold_anchor':
+            args.extend(['--experiment', 'scaffold_anchor', '--scaffold_repo', job['scaffold_repo'],
+                         '--scaffold_python', job.get('scaffold_python') or sys.executable,
+                         '--scaffold_iterations', str(job.get('scaffold_iterations', 30000)),
+                         '--scaffold_resolution', str(job.get('scaffold_resolution', 1))])
     elif action == "extract_frames":
         videos = media_files(scene / "raw_video", VIDEO_EXTENSIONS)
         if not videos:
@@ -156,6 +161,27 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     if not isinstance(data, dict):
         raise ValueError("Body harus berupa objek JSON.")
     action = data.get("action", "full_pipeline")
+    experiment = data.get('experiment', 'baseline')
+    if experiment not in ('baseline', 'scaffold_anchor'):
+        raise ValueError('Eksperimen harus baseline atau scaffold_anchor.')
+    scaffold = {}
+    if experiment == 'scaffold_anchor':
+        if action != 'full_pipeline':
+            raise ValueError('Eksperimen Scaffold dijalankan melalui Pipeline lengkap.')
+        repo = data.get('scaffold_repo')
+        if not isinstance(repo, str) or not repo.strip() or not (Path(repo) / 'train.py').is_file():
+            raise ValueError('Isi lokasi repository Scaffold-GS pada komputer training (harus memuat train.py).')
+        python = data.get('scaffold_python') or sys.executable
+        if not isinstance(python, str):
+            raise ValueError('Python Scaffold harus berupa path executable.')
+        iterations = data.get('scaffold_iterations', 30000)
+        resolution = data.get('scaffold_resolution', 1)
+        if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
+            raise ValueError('Iterasi Scaffold harus bilangan bulat positif.')
+        if isinstance(resolution, bool) or resolution not in (1, 2, 4, 8):
+            raise ValueError('Downscale Scaffold harus 1, 2, 4, atau 8.')
+        scaffold = dict(scaffold_repo=str(Path(repo).resolve()), scaffold_python=python,
+                        scaffold_iterations=iterations, scaffold_resolution=resolution)
     if action not in {"full_pipeline", "extract_frames", "colmap", "3dgs", "sugar", "evaluate", "evaluate_visual"}:
         raise ValueError("Tahap pipeline tidak dikenal.")
     pipeline_start = data.get('pipeline_start', 'auto')
@@ -245,6 +271,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                 skipped.append(f'{cls}/{mdl} ({current_method}): {reason}')
                 continue
             jobs.append(dict(action=action, class_name=cls, model_id=mdl, gpu=gpu,
+                             experiment=experiment, **scaffold,
                              pipeline_start=pipeline_start,
                              resume=data.get("resume", True) is True,
                              evaluation_method=current_method, scale_factor=scale, apply_icp=apply_icp,

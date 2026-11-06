@@ -137,13 +137,19 @@ def read_training_config(output):
     return {kw.arg: ast.literal_eval(kw.value) for kw in tree.body.keywords}
 
 
-def training_matches(output, scene, downscale, max_size, white_background=False):
+def training_matches(output, scene, downscale, max_size, white_background=False, initial_ply=None,
+                     use_recorded_initialization=False):
     try:
         settings = json.loads((Path(output) / 'training_settings.json').read_text(encoding='utf-8'))
+        if use_recorded_initialization and settings.get('initialization'):
+            initial_ply = settings['initialization']['path']
+        initialization = ({'path': str(Path(initial_ply).resolve()), 'signature': file_signature(initial_ply)}
+                          if initial_ply else None)
         matches = (settings['image_downscale'] == downscale and settings['image_max_size'] == max_size
                    and settings['colmap_signature'] == colmap_signature(scene)
                    and settings.get('white_background', False) == white_background
-                   and settings.get('eval_split', True) is True)
+                   and settings.get('eval_split', True) is True
+                   and settings.get('initialization') == initialization)
         if (Path(output) / 'cfg_args').is_file():
             config = read_training_config(output)
             matches = matches and config.get('eval') is True and config.get('white_background', False) == white_background

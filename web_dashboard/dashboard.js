@@ -534,10 +534,15 @@ function updateQueuePlan() {
   $('queueSaveCalibration').disabled = isFilePreview || busy || invalidScale || !selectedInputs.some(inputs => inputs.unit.value && (!manual || Number(inputs.scale.value) > 0));
   $('queueMethod').disabled = busy;
   $('queuePipelineStart').disabled = busy;
+  const scaffoldSelected = $('queueExperiment').value === 'scaffold_anchor';
+  $('queueScaffoldOptions').hidden = !scaffoldSelected;
+  $('queueExperiment').disabled = busy;
+  for (const id of ['queueScaffoldRepo', 'queueScaffoldPython', 'queueScaffoldIterations', 'queueScaffoldResolution']) $(id).disabled = busy;
   $('queuePipelineHelp').textContent = $('queuePipelineStart').value === 'existing_colmap'
     ? 'Memakai images/ dan sparse/0 yang sudah ada, termasuk hasil dari komputer lain. Langsung menjalankan 3DGS → SuGaR → evaluasi visual. COLMAP tidak dijalankan ulang; target yang belum lengkap dilewati. Pengaturan resolusi training tetap berlaku.'
     : 'Dengan Lewati tahap yang selesai aktif, setiap model melanjutkan dari hasil terakhir yang tersedia. COLMAP lengkap, termasuk hasil teman, langsung dipakai. Training dan evaluasi yang lengkap serta cocok dilewati; checkpoint parsial yang cocok dipulihkan. Pengaturan COLMAP diterapkan hanya saat membuat COLMAP baru. Untuk interrupted, gunakan Antrekan Ulang agar pengaturan asli dan prioritas pemulihannya dipertahankan.';
   $('queueApplyIcp').disabled = busy;
+  if (scaffoldSelected) $('queuePipelineHelp').textContent = 'COLMAP → Scaffold-GS → anchor dengan warna COLMAP → 3DGS → SuGaR → evaluasi. Output ablasi terpisah. Tahap Scaffold yang terputus dimulai ulang; tahap Scaffold yang selesai dan cocok dilewati.';
   $('queueAlignment').disabled = busy;
   $('queueClass').disabled = busy;
   $('queueModel').disabled = busy || !queueSelection.class_name;
@@ -588,6 +593,11 @@ async function submitQueueDialog() {
   const action = selectedQueueAction;
   const payload = {...readExperimentSettings(), ...queueSelection, action,
     pipeline_start: action === 'full_pipeline' ? $('queuePipelineStart').value : 'auto',
+    experiment: action === 'full_pipeline' ? $('queueExperiment').value : 'baseline',
+    scaffold_repo: $('queueScaffoldRepo').value.trim(),
+    scaffold_python: $('queueScaffoldPython').value.trim(),
+    scaffold_iterations: Number($('queueScaffoldIterations').value),
+    scaffold_resolution: Number($('queueScaffoldResolution').value),
     evaluation_method: ['evaluate_visual', 'evaluate'].includes(action) ? $('queueMethod').value : 'SuGaR',
     geometry_settings_required: action === 'evaluate',
     apply_icp: $('queueAlignment').value === 'automatic' || $('queueApplyIcp').checked};
@@ -670,7 +680,7 @@ async function pollLogs() {
         const failed = ['FAILED', 'INTERRUPTED', 'CANCELLED'].includes(job.status);
         const statusClass = job.status === 'COMPLETED' ? 'chip-done' : failed ? 'chip-error' :
           ['RUNNING', 'STOPPING'].includes(job.status) ? 'chip-partial' : 'chip-pending';
-        row.innerHTML = `<td>${modelIdentityHtml(job.class_name, job.model_id)}</td><td>${esc(actionLabel(job.action))}${job.action.includes('evaluate') ? ' · ' + esc(job.evaluation_method) : ''}${job.pipeline_start === 'existing_colmap' ? '<small class="model-reference">Mulai dari hasil COLMAP</small>' : ''}${job.recovery ? '<small class="model-reference">Prioritas pemulihan checkpoint</small>' : ''}</td>
+        row.innerHTML = `<td>${modelIdentityHtml(job.class_name, job.model_id)}</td><td>${esc(actionLabel(job.action))}${job.action.includes('evaluate') ? ' · ' + esc(job.evaluation_method) : ''}${job.experiment === 'scaffold_anchor' ? '<small class="model-reference">Ablasi anchor Scaffold-GS</small>' : ''}${job.pipeline_start === 'existing_colmap' ? '<small class="model-reference">Mulai dari hasil COLMAP</small>' : ''}${job.recovery ? '<small class="model-reference">Prioritas pemulihan checkpoint</small>' : ''}</td>
           <td><span class="chip ${statusClass}">${esc(job.status)}</span></td>
           <td id="job-duration-${esc(job.id)}">${job.started_at ? fmtSec((job.finished_at || Date.now() / 1000) - job.started_at) : '-'}</td><td></td>`;
         const logButton = document.createElement('button');

@@ -252,7 +252,13 @@
       </div>
       <p id="queueActionHelp" class="queue-action-help"></p>
       </section>
-      <div id="queuePipelineOptions" class="queue-method-options queue-pipeline-options"><label for="queuePipelineStart">Mulai pipeline<select id="queuePipelineStart" onchange="updateQueuePlan()"><option value="auto">Otomatis — lanjutkan hasil terakhir tiap model</option><option value="existing_colmap">Hanya model dengan hasil COLMAP lengkap</option></select></label><p id="queuePipelineHelp"></p></div>
+      <div id="queuePipelineOptions" class="queue-method-options queue-pipeline-options"><label for="queuePipelineStart">Mulai pipeline<select id="queuePipelineStart" onchange="updateQueuePlan()"><option value="auto">Otomatis — lanjutkan hasil terakhir tiap model</option><option value="existing_colmap">Hanya model dengan hasil COLMAP lengkap</option></select></label><label for="queueExperiment">Eksperimen<select id="queueExperiment" onchange="updateQueuePlan()"><option value="baseline">Baseline 3DGS + SuGaR</option><option value="scaffold_anchor">Ablasi inisialisasi anchor Scaffold-GS</option></select></label>
+      <div id="queueScaffoldOptions" hidden>
+        <label>Folder repository Scaffold-GS<input id="queueScaffoldRepo" placeholder="/home/user/Scaffold-GS"></label>
+        <label>Python environment Scaffold-GS<input id="queueScaffoldPython" placeholder="Kosong = Python pipeline saat ini"></label>
+        <label>Iterasi Scaffold<input id="queueScaffoldIterations" type="number" min="1" value="30000"></label>
+        <label>Downscale foto Scaffold<select id="queueScaffoldResolution"><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></label>
+      </div><p id="queuePipelineHelp"></p></div>
       <div id="queueMethodOptions" class="queue-method-options" hidden><label for="queueMethod">Metode yang dievaluasi<select id="queueMethod" onchange="updateQueuePlan()"><option value="both">3DGS dan SuGaR</option><option value="3DGS">3DGS saja</option><option value="SuGaR">SuGaR saja</option></select></label></div>
       <div id="queueGeometryOptions" class="queue-geometry-options" hidden>
         <div class="queue-block-heading"><h3>Data LiDAR &amp; penyelarasan</h3></div>

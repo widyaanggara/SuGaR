@@ -85,7 +85,8 @@ class JobQueue:
         with self.condition:
             def key_for(item):
                 return (item['action'], item['class_name'], item['model_id'],
-                        item.get('evaluation_method', '') if item['action'].startswith('evaluate') else '')
+                        item.get('evaluation_method', '') if item['action'].startswith('evaluate') else '',
+                        item.get('experiment', 'baseline'))
             occupied = {key_for(j) for j in self.jobs
                         if j["status"] in ("QUEUED", "RUNNING", "STOPPING")}
             for spec in specs:
@@ -110,7 +111,8 @@ class JobQueue:
                 raise ValueError('Pilih pekerjaan yang terputus, gagal, atau dibatalkan.')
             def key(job):
                 return (job['action'], job['class_name'], job['model_id'],
-                        job.get('evaluation_method', '') if job['action'].startswith('evaluate') else '')
+                        job.get('evaluation_method', '') if job['action'].startswith('evaluate') else '',
+                        job.get('experiment', 'baseline'))
             pending = next((job for job in self.jobs if key(job) == key(original)
                             and job['status'] in ('QUEUED', 'RUNNING', 'STOPPING')), None)
             if pending and pending['status'] != 'QUEUED':

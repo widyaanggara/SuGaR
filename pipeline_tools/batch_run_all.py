@@ -28,8 +28,13 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          image_downscale=1, image_max_size=1600, colmap_device=None,
                          colmap_matcher='exhaustive', colmap_max_features=8192,
                          colmap_sequential_overlap=10, gaussians_per_triangle=1,
-                         regularization='dn_consistency'):
+                         regularization='dn_consistency', experiment='baseline', scaffold_repo=None,
+                         scaffold_python=None, scaffold_iterations=30000, scaffold_resolution=1):
     scene_dir, root = Path(scene_dir), Path(root)
+    if experiment not in ('baseline', 'scaffold_anchor'):
+        raise ValueError('Unknown experiment.')
+    if experiment == 'scaffold_anchor' and not scaffold_repo:
+        raise ValueError('--scaffold_repo is required for scaffold_anchor.')
     sugar_config = sugar_settings(dict(vertices=vertices, refinement_time=refinement_time,
         gaussians_per_triangle=gaussians_per_triangle, regularization=regularization))
     sfm_settings = colmap_settings(dict(colmap_device=colmap_device or ('cuda' if use_gpu_colmap else 'cpu'),
@@ -46,6 +51,12 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
     common = ["--statue_class", statue_class, "--model_id", model_id]
     out_3dgs = root / "outputs" / "3dgs" / statue_class / model_id
     out_sugar = root / "outputs" / "sugar" / statue_class / model_id
+    experiment_args = []
+    if experiment == 'scaffold_anchor':
+        experiment_root = root / 'outputs/ablations/scaffold_anchor'
+        out_3dgs = experiment_root / '3dgs' / statue_class / model_id
+        out_sugar = experiment_root / 'sugar' / statue_class / model_id
+        experiment_args = ['--experiment', experiment]
     image_args = ['--image_downscale', image_downscale, '--image_max_size', image_max_size]
     if not media_files(scene_dir / "input") and not media_files(scene_dir / "images"):
         video = media_files(scene_dir / "raw_video", VIDEO_EXTENSIONS)[0]
@@ -53,7 +64,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
         if not media_files(scene_dir / "input"):
             raise RuntimeError("Tidak ada frame yang lolos filter ketajaman.")
     if skip_colmap:
-        print('[INFO] Memakai hasil COLMAP yang sudah ada; langsung ke training 3DGS. '
+        print('[INFO] Memakai hasil COLMAP yang sudah ada; lanjut ke training. '
               'Pengaturan ekstraksi/pencocokan COLMAP saat ini tidak diterapkan ke hasil impor.', flush=True)
     elif resume and has_colmap_model(scene_dir):
         # A ready reconstruction is the starting point, including imports from
@@ -71,14 +82,23 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
     if not skip_colmap and not (scene_dir / 'colmap_settings.json').is_file():
         print('[INFO] Resolusi/pengaturan SfM hasil lama atau impor belum tercatat. '
               'Untuk menghitung ulang SfM, pilih COLMAP saja atau nonaktifkan pemulihan tahap.', flush=True)
+    initial_ply = None
+    if experiment == 'scaffold_anchor':
+        from pipeline_tools.scaffold_init import prepare
+        initial_ply = prepare(scene_dir, experiment_root / 'scaffold' / statue_class / model_id,
+                              scaffold_repo, python=scaffold_python or sys.executable,
+                              iterations=scaffold_iterations, resolution=scaffold_resolution,
+                              gpu=gpu, resume=resume)
+    initial_args = ['--initial_ply', initial_ply] if initial_ply else []
     trained_3dgs = False
     if skip_3dgs:
         if not (has_checkpoint(out_3dgs, 7000) and has_checkpoint(out_3dgs, 30000)
-                and training_matches(out_3dgs, scene_dir, image_downscale, image_max_size)):
+                and training_matches(out_3dgs, scene_dir, image_downscale, image_max_size, initial_ply=initial_ply)):
             raise RuntimeError("--skip_3dgs memerlukan checkpoint 7000 dan 30000 yang lengkap.")
     elif not (resume and has_checkpoint(out_3dgs, 7000) and has_checkpoint(out_3dgs, 30000)
-              and training_matches(out_3dgs, scene_dir, image_downscale, image_max_size)):
+              and training_matches(out_3dgs, scene_dir, image_downscale, image_max_size, initial_ply=initial_ply)):
         run_stage("03_train_3dgs.py", ["-s", scene_dir, *common, "--gpu", gpu, *image_args,
+                  '-o', out_3dgs, *experiment_args, *initial_args,
                   *([] if resume else ['--no_resume'])], root)
         trained_3dgs = True
     else:
@@ -93,6 +113,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          and config.get('image_downscale') == image_downscale and config.get('image_max_size') == image_max_size)
     if not skip_sugar and not (resume and not trained_3dgs and sugar_matches):
         run_stage("04_train_sugar.py", ["-s", scene_dir, "-c", out_3dgs, *common,
+                  '-o', out_sugar, *experiment_args,
                   "--gpu", gpu, *sugar_arguments(sugar_config), *image_args,
                   *([] if resume else ['--no_resume'])], root)
         trained_sugar = True
@@ -104,7 +125,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                 continue
             if not (resume and not retrained and has_evaluation(output)
                     and evaluation_matches(output, image_downscale, image_max_size)):
-                run_stage("06_evaluate_rendering.py", [*common, "--method", method, "--gpu", gpu, *image_args], root)
+                run_stage("06_evaluate_rendering.py", [*common, "--method", method, "--gpu", gpu, *image_args, *experiment_args], root)
             else:
                 print(f'[RESUME] Evaluasi visual {method} sudah lengkap dan cocok; dilewati.', flush=True)
     return "COMPLETED"
@@ -121,9 +142,16 @@ def main():
     parser.add_argument('--gaussians_per_triangle', type=int, choices=(1, 3, 4, 6), default=1)
     parser.add_argument('--regularization', choices=('dn_consistency', 'density', 'sdf'), default='dn_consistency')
     parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument('--experiment', choices=['baseline', 'scaffold_anchor'], default='baseline')
+    parser.add_argument('--scaffold_repo')
+    parser.add_argument('--scaffold_python', default=sys.executable)
+    parser.add_argument('--scaffold_iterations', type=int, default=30000)
+    parser.add_argument('--scaffold_resolution', type=int, choices=(1, 2, 4, 8), default=1)
     add_resolution_arguments(parser, colmap=True)
     add_colmap_arguments(parser)
     args = parser.parse_args()
+    if args.experiment == 'scaffold_anchor' and (not args.scaffold_repo or args.scaffold_iterations < 1):
+        parser.error('Scaffold requires --scaffold_repo and positive --scaffold_iterations.')
     resolution_settings(vars(args))
     sugar_settings(vars(args))
     if args.gpu < 0 or args.vertices < 1000:
@@ -145,7 +173,10 @@ def main():
                 colmap_device=args.colmap_device, colmap_matcher=args.colmap_matcher,
                 colmap_max_features=args.colmap_max_features,
                 colmap_sequential_overlap=args.colmap_sequential_overlap,
-                gaussians_per_triangle=args.gaussians_per_triangle, regularization=args.regularization)
+                gaussians_per_triangle=args.gaussians_per_triangle, regularization=args.regularization,
+                experiment=args.experiment, scaffold_repo=args.scaffold_repo,
+                scaffold_python=args.scaffold_python, scaffold_iterations=args.scaffold_iterations,
+                scaffold_resolution=args.scaffold_resolution)
             results.append({"target": f"{cls}/{mdl}", "status": status})
         except Exception as exc:
             print(f"[ERROR] {cls}/{mdl}: {exc}", flush=True)

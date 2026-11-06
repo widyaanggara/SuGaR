@@ -45,7 +45,8 @@ def train_sugar_pipeline(scene_path: str,
         raise FileNotFoundError("Dataset COLMAP dan checkpoint 3DGS iterasi 7000 harus lengkap.")
     sugar_settings(dict(vertices=n_vertices, refinement_time=refinement_time,
         gaussians_per_triangle=gaussians_per_triangle, regularization=regularization_type))
-    if not training_matches(checkpoint_3dgs, scene_path, image_downscale, image_max_size, white_background):
+    if not training_matches(checkpoint_3dgs, scene_path, image_downscale, image_max_size, white_background,
+                            use_recorded_initialization=True):
         raise ValueError('Resolusi, split, background, atau model COLMAP berbeda dari baseline 3DGS. Jalankan Pipeline Lengkap untuk konfigurasi ini.')
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
     os.environ['SUGAR_IMAGE_DOWNSCALE'] = str(image_downscale)
@@ -285,6 +286,7 @@ def main():
     parser.add_argument("--scene_path", "-s", type=str, required=True, help="Folder dataset (misal: datasets/Dewa/model_01).")
     parser.add_argument("--checkpoint_3dgs", "-c", type=str, required=True, help="Folder output 3DGS yang memuat checkpoint 7000.")
     parser.add_argument('--no_resume', action='store_true', help='Mulai tahap SuGaR baru tanpa memulihkan checkpoint.')
+    parser.add_argument('--experiment', choices=['baseline', 'scaffold_anchor'], default='baseline')
     parser.add_argument("--output_dir", "-o", type=str, default=None, help="Folder tujuan (default: outputs/sugar/<Kelas>/<Model_ID>).")
     parser.add_argument("--statue_class", type=str, default="Dewa", help="Nama kelas patung.")
     parser.add_argument("--model_id", type=str, default="model_01", help="ID model patung.")
@@ -304,10 +306,13 @@ def main():
 
     if args.output_dir is None:
         output_dir = PROJECT_ROOT / "outputs" / "sugar" / args.statue_class / args.model_id
+        if args.experiment != 'baseline':
+            output_dir = PROJECT_ROOT / 'outputs/ablations' / args.experiment / 'sugar' / args.statue_class / args.model_id
     else:
         output_dir = Path(args.output_dir)
 
-    logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id, method="SuGaR")
+    logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id,
+                          method="SuGaR" if args.experiment == 'baseline' else 'SuGaR_scaffold_anchor')
     logger.set_parameters({
         "regularization": args.regularization,
         "refinement_time": args.refinement_time,

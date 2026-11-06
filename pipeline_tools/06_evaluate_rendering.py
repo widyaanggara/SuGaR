@@ -21,7 +21,7 @@ def training_background(output):
     return bool(options.get('white_background', False))
 
 
-def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_max_size=1600):
+def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_max_size=1600, experiment='baseline'):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
     os.environ.setdefault('SUGAR_IMAGE_DEVICE', 'cpu')
     os.environ['SUGAR_IMAGE_DOWNSCALE'] = str(image_downscale)
@@ -39,13 +39,17 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
     torch.cuda.set_device(0)
     torch.cuda.reset_peak_memory_stats()
     scene = PROJECT_ROOT / 'datasets' / cls / mdl
-    baseline = PROJECT_ROOT / 'outputs/3dgs' / cls / mdl
-    output = PROJECT_ROOT / 'outputs' / ('3dgs' if method == '3DGS' else 'sugar') / cls / mdl
+    output_root = PROJECT_ROOT / 'outputs'
+    if experiment != 'baseline':
+        output_root = output_root / 'ablations' / experiment
+    baseline = output_root / '3dgs' / cls / mdl
+    output = output_root / ('3dgs' if method == '3DGS' else 'sugar') / cls / mdl
     iteration = 30000 if method == '3DGS' else 7000
     if not has_checkpoint(baseline, iteration):
         raise FileNotFoundError(f'Checkpoint 3DGS {iteration} belum lengkap.')
     white = training_background(baseline)
-    if not training_matches(baseline, scene, image_downscale, image_max_size, white):
+    if not training_matches(baseline, scene, image_downscale, image_max_size, white,
+                            use_recorded_initialization=True):
         raise ValueError('Konfigurasi evaluasi berbeda dari training baseline: resolusi, split, atau model COLMAP berubah.')
     manifest = None
     if method == 'SuGaR':
@@ -131,18 +135,20 @@ def main():
     parser.add_argument('--model_id', required=True)
     parser.add_argument('--method', choices=['3DGS', 'SuGaR'], required=True)
     parser.add_argument('--gpu', type=int, default=0)
+    parser.add_argument('--experiment', choices=['baseline', 'scaffold_anchor'], default='baseline')
     add_resolution_arguments(parser)
     args = parser.parse_args()
     resolution_settings(vars(args))
     if args.gpu < 0:
         parser.error('GPU harus >= 0.')
     scene_pairs(args.statue_class, args.model_id)
-    logger = ThesisLogger(args.statue_class, args.model_id, args.method)
+    logger = ThesisLogger(args.statue_class, args.model_id,
+                          args.method if args.experiment == 'baseline' else args.method + '_scaffold_anchor')
     try:
         with gpu_lock(args.gpu):
             logger.start_stage('Evaluasi_Visual')
             evaluate_rendering(args.statue_class, args.model_id, args.method, args.gpu, logger,
-                               args.image_downscale, args.image_max_size)
+                               args.image_downscale, args.image_max_size, args.experiment)
             logger.end_stage('Evaluasi_Visual')
         logger.finalize(True)
         return 0

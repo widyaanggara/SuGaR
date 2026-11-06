@@ -804,13 +804,23 @@ function setMetricExperiment(experiment) {
 function renderMetrics() {
   const method = $('metricMethod').value || 'all';
   const threshold = $('geometryThreshold').value === '5' ? 5 : 2;
-  const display = cachedMetrics.filter(row => metricMethods[metricExperiment].includes(row.Metode))
+  const filtered = cachedMetrics.filter(row => metricMethods[metricExperiment].includes(row.Metode))
     .map(row => ({...row, Metode: row.Metode.replace('_scaffold_anchor', '')}))
     .filter(row => method === 'all' || row.Metode === method);
+  const modelGroups = new Map();
+  for (const row of filtered) {
+    const key = JSON.stringify([row.Kelas, row['Model ID']]);
+    if (!modelGroups.has(key)) modelGroups.set(key, []);
+    modelGroups.get(key).push(row);
+  }
+  const display = [...modelGroups.values()].flatMap((rows, groupIndex) =>
+    rows.sort((a, b) => ['3DGS', 'SuGaR'].indexOf(a.Metode) - ['3DGS', 'SuGaR'].indexOf(b.Metode))
+      .map(row => ({...row, shadedGroup: groupIndex % 2 === 0})));
+
   const precision = `Precision @${threshold}cm (%)`, recall = `Recall @${threshold}cm (%)`, f1 = `F1 @${threshold}cm (%)`;
   const columns = ['Timestamp', 'Kelas', 'Model ID', 'Metode', 'PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
     precision, recall, f1, 'Peak VRAM (GB)', 'Total Waktu (Menit)'];
-  $('metricsBody').innerHTML = display.map(row => '<tr>' + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
+  $('metricsBody').innerHTML = display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
   for (const [column, target, context, unit, digits, explanation] of [
     ['PSNR (dB)', 'kpiPsnr', 'psnrContext', ' dB', 2, '↑'],
     ['SSIM', 'kpiSsim', 'ssimContext', '', 4, '↑'],

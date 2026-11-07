@@ -65,9 +65,34 @@ def image_counts(root, cls, model, experiment, row):
     counts = [report.get(k) for k in ('registered_images', 'train_images', 'test_images')]
     if all(isinstance(v, int) and v >= 0 for v in counts) and counts[0] == sum(counts[1:]):
         return counts
-    # Legacy evaluation recorded test views; do not guess the training population.
+    # Legacy evaluation uses this experiment's 3DGS cameras.json for BOTH methods.
+    # Match the actual test image names and split before recovering its population.
     views = report.get('per_view')
+    recovered = legacy_image_counts(base / '3dgs' / cls / model / 'cameras.json', report)
+    if recovered is not None:
+        return recovered
     return [None, None, len(views) if isinstance(views, list) else None]
+
+
+def legacy_image_counts(camera_path, report):
+    cameras = read_json(camera_path)
+    views = report.get('per_view')
+    interval = report.get('eval_split_interval')
+    if (not isinstance(cameras, list) or not cameras or not isinstance(views, list) or not views
+            or type(interval) is not int or interval < 2):
+        return None
+    if any(not isinstance(c, dict) or not isinstance(c.get('img_name'), str) or not c['img_name']
+           for c in cameras):
+        return None
+    if any(not isinstance(v, dict) or not isinstance(v.get('image'), str) or not v['image']
+           for v in views):
+        return None
+    # load_gs_cameras deduplicates by img_name, then sorts before splitting.
+    names = sorted({c['img_name'] for c in cameras})
+    tested = [v['image'] for v in views]
+    if len(set(tested)) != len(tested) or sorted(tested) != names[::interval]:
+        return None
+    return [len(names), len(names) - len(tested), len(tested)]
 
 
 def column_name(index):
@@ -191,8 +216,8 @@ def build_excel(rows, root):
     notes = [
         ['Cakupan', 'Semua baseline dan ablasi, tidak mengikuti filter tab/metode dashboard. Hanya status COMPLETED; hasil terakhir digabung per patung/metode.'],
         ['Sumber metrik', 'Log evaluasi summary_comparison.csv yang juga digunakan dashboard. Nilai kosong tidak diubah menjadi nol.'],
-        ['Registered / train / test', 'Jumlah kamera pada run evaluasi, dari evaluation/metrics.json yang cocok dengan metrik. Registered = train + test. Train adalah gambar latih; test adalah gambar uji.'],
-        ['Run lama', 'Jika jumlah registered/train belum tercatat, kolom tetap kosong (—). Jumlah test bisa diperoleh dari per_view. Evaluasi visual ulang mencatat ketiganya.'],
+        ['Registered / train / test', 'Dari evaluation/metrics.json yang cocok dengan metrik, atau cameras.json milik run 3DGS pada eksperimen yang sama. Train = registered − test.'],
+        ['Run lama', 'Jumlah dipulihkan dari nama kamera unik jika daftar gambar uji dan interval split cocok dengan per_view. Tidak perlu evaluasi ulang. Jika artefak hilang/tidak cocok, registered/train tetap —.'],
         ['Waktu dan VRAM', 'Diambil dari baris training, bukan evaluasi. Waktu SuGaR hanya tahap SuGaR. Biaya Scaffold belum masuk. Jangan menjumlahkan peak VRAM antar tahap.'],
         ['Perbandingan adil', 'Bandingkan patung, split uji, resolusi dan konfigurasi yang sama. Selisih dihitung dari nilai log yang telah dibulatkan.'],
         ['Kesimpulan', 'PSNR/SSIM/Precision/Recall/F1 lebih tinggi lebih baik; LPIPS/Chamfer lebih rendah lebih baik. Nilai render tidak menggantikan evaluasi geometri.'],

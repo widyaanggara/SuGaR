@@ -21,10 +21,17 @@ bukan nol. Kolom metode membedakan hasil 3DGS dan SuGaR tanpa menggandakan kolom
 
 Jumlah gambar berasal dari `evaluation/metrics.json` yang cocok dengan nilai
 metrik visual pada laporan. Evaluasi baru menyimpan `registered_images`,
-`train_images`, dan `test_images`. Untuk hasil lama, jumlah test dapat diambil
-dari `per_view`; registered dan train tidak ditebak dari isi folder dataset.
-Jalankan evaluasi visual kembali untuk mencatat jumlah yang belum tersedia;
-training ulang tidak diperlukan jika checkpoint dan konfigurasi masih cocok.
+`train_images`, dan `test_images`. Untuk hasil lama, ekspor membaca
+`outputs/3dgs/<kelas>/<model>/cameras.json` (atau folder 3DGS pada eksperimen
+ablasi). Evaluasi 3DGS dan SuGaR sama-sama memakai daftar kamera tersebut.
+Nama gambar dideduplikasi dan diurutkan seperti loader evaluasi. Daftar gambar
+test hasil pembagian menurut `eval_split_interval` harus cocok persis dengan
+nama pada `per_view`. Registered adalah jumlah kamera unik; train dihitung
+sebagai registered dikurangi test. Tidak perlu training atau evaluasi ulang.
+
+Jika file kamera hilang, rusak, atau split tidak cocok, registered/train tetap
+`—` dan jumlah test tetap diambil dari `per_view`. Ekspor tidak menebak dari
+jumlah foto mentah atau model COLMAP pada dataset yang mungkin sudah berubah.
 
 Waktu/VRAM berasal dari baris training, bukan baris evaluasi. Waktu SuGaR tidak
 mencakup tahap 3DGS; waktu ablasi belum mencakup Scaffold. Peak VRAM antar tahap

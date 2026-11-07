@@ -105,6 +105,57 @@ class ExcelExportTests(unittest.TestCase):
             for name in archive.namelist():
                 ET.fromstring(archive.read(name))
 
+    def test_legacy_camera_counts_for_both_methods_and_experiments(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for experiment, total in [('baseline', 17), ('scaffold_anchor', 25)]:
+                base = root / 'outputs'
+                suffix = ''
+                if experiment != 'baseline':
+                    base /= 'ablations/scaffold_anchor'
+                    suffix = '_scaffold_anchor'
+                names = [f'IMG_{i:03d}' for i in range(total)]
+                path = base / '3dgs/Dewa/model_02/cameras.json'
+                path.parent.mkdir(parents=True)
+                # File order differs from evaluation order; duplicates match loader semantics.
+                path.write_text(json.dumps([{'img_name': name} for name in reversed(names)] + [{'img_name': names[0]}]))
+                for method in ('3DGS', 'SuGaR'):
+                    report_path = base / method.lower() / 'Dewa/model_02/evaluation/metrics.json'
+                    report_path.parent.mkdir(parents=True)
+                    report_path.write_text(json.dumps(dict(psnr=25, ssim=0.8, lpips=0.2,
+                        eval_split_interval=8, per_view=[{'image': name} for name in names[::8]])))
+                    row = dict(sample_rows()[1], Metode=method + suffix)
+                    self.assertEqual(image_counts(root, 'Dewa', 'model_02', experiment, row),
+                                     [total, total - len(names[::8]), len(names[::8])])
+                    with ZipFile(io.BytesIO(build_excel([row], root))) as archive:
+                        sheet = ET.fromstring(archive.read('xl/worksheets/sheet' + ('2' if experiment == 'baseline' else '3') + '.xml'))
+                        cells = {c.attrib['r']: c for c in sheet.findall('.//s:c', NS)}
+                        self.assertEqual(int(cells['F5'].find('s:v', NS).text), total)
+                        self.assertEqual(int(cells['G5'].find('s:v', NS).text), total - len(names[::8]))
+
+    def test_legacy_counts_reject_mismatched_or_malformed_artifacts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            base = root / 'outputs/3dgs/Dewa/model_02'
+            report_path = base / 'evaluation/metrics.json'
+            report_path.parent.mkdir(parents=True)
+            cameras = [{'img_name': f'IMG_{i:03d}'} for i in range(17)]
+            (base / 'cameras.json').write_text(json.dumps(cameras))
+            report = dict(psnr=25, ssim=0.8, lpips=0.2, eval_split_interval=8,
+                          per_view=[{'image': f'IMG_{i:03d}'} for i in (0, 8, 16)])
+            for change in [dict(eval_split_interval=0), dict(eval_split_interval=True),
+                           dict(eval_split_interval=None), dict(per_view=[{'image': 'OTHER'}]),
+                           dict(per_view=[{'image': 'IMG_000'}]*3)]:
+                changed = dict(report, **change)
+                report_path.write_text(json.dumps(changed))
+                self.assertEqual(image_counts(root, 'Dewa', 'model_02', 'baseline', sample_rows()[1]),
+                                 [None, None, len(changed['per_view'])])
+            report_path.write_text(json.dumps(report))
+            for malformed in ['{invalid', '{}', '[{}]', '[null]', '[]']:
+                (base / 'cameras.json').write_text(malformed)
+                self.assertEqual(image_counts(root, 'Dewa', 'model_02', 'baseline', sample_rows()[1]),
+                                 [None, None, 3])
+
 
 if __name__ == '__main__':
     unittest.main()

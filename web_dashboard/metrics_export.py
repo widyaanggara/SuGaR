@@ -87,10 +87,17 @@ def sheet_xml(title, note, headers, rows, groups=()):
     end = column_name(width)
     data = [[title], [note], [], headers, *rows]
     cells = []
+    previous_model, model_band = None, -1
     for r, values in enumerate(data, 1):
+        if r > 4 and headers[0] == 'Kelas':
+            model = tuple(values[:2])
+            if model != previous_model:
+                model_band += 1
+                previous_model = model
+        body_style = (4 + model_band % 2) if model_band >= 0 else (4 if r % 2 else 5)
         contents = []
         for c, value in enumerate(values, 1):
-            style = 1 if r == 1 else 2 if r in (3, 4) else 3 if r == 2 else (4 if r % 2 else 5)
+            style = 1 if r == 1 else 2 if r in (3, 4) else 3 if r == 2 else body_style
             if value is None:
                 value = '—'
             ref = f'{column_name(c)}{r}'
@@ -155,37 +162,32 @@ def build_excel(rows, root):
         suffix = '' if experiment == 'baseline' else '_scaffold_anchor'
         values = []
         for cls, mdl in pairs:
-            a, b = [index.get((cls, mdl, method + suffix), {}) for method in ('3DGS', 'SuGaR')]
-            if not a and not b:
-                continue
-            line = [cls, mdl, (a or b).get('Nama Model', mdl)]
-            for row in (a, b):
-                line += [row.get('Timestamp'), *image_counts(root, cls, mdl, experiment, row),
-                         *[number(row.get(k)) for k in METRICS]]
-            values.append(line)
+            for method in ('3DGS', 'SuGaR'):
+                row = index.get((cls, mdl, method + suffix))
+                if row is None:
+                    continue
+                values.append([cls, mdl, row.get('Nama Model', mdl), method,
+                               row.get('Timestamp'), *image_counts(root, cls, mdl, experiment, row),
+                               *[number(row.get(k)) for k in METRICS]])
         note = 'Hasil terakhir per patung. ↑ lebih tinggi lebih baik; ↓ lebih rendah lebih baik. — = belum tersedia. Waktu/VRAM per tahap; SuGaR tidak termasuk 3DGS; ablasi tidak termasuk Scaffold.'
-        headers = ['Kelas', 'Model ID', 'Nama patung', *block, *block]
+        headers = ['Kelas', 'Model ID', 'Nama patung', 'Metode', *block]
         sheets.append((title, sheet_xml(title + ' | Evaluasi rekonstruksi', note, headers, values,
-            [(1, 3, 'Patung'), (4, 3 + len(block), '3DGS'), (4 + len(block), len(headers), 'SuGaR')])) )
+            [(1, 5, 'Patung dan metode'), (6, 8, 'Jumlah gambar'), (9, 11, 'Kualitas render'),
+             (12, 18, 'Kualitas geometri'), (19, 20, 'Sumber daya')])) )
     delta_rows = []
     for cls, mdl in pairs:
-        line, paired = [cls, mdl, None], False
         for method in ('3DGS', 'SuGaR'):
             a, b = index.get((cls, mdl, method)), index.get((cls, mdl, method + '_scaffold_anchor'))
             if not a or not b:
-                line += [None] * len(METRICS)
                 continue
-            paired = True
-            line[2] = a.get('Nama Model', mdl)
-            line += [
+            delta_rows.append([cls, mdl, a.get('Nama Model', mdl), method, *[
                 number(b.get(k)) - number(a.get(k)) if number(a.get(k)) is not None and number(b.get(k)) is not None else None
-                for k in METRICS]
-        if paired:
-            delta_rows.append(line)
+                for k in METRICS]])
     sheets.insert(0, ('Perbandingan', sheet_xml('Ablasi − baseline | Patung yang sama',
         'Selisih per patung/metode; positif menguntungkan untuk ↑, negatif untuk ↓. VRAM/waktu: negatif lebih hemat. Bukan bukti signifikansi; pastikan split, resolusi dan konfigurasi sama.',
-        ['Kelas', 'Model ID', 'Nama patung', *['Δ ' + x for x in labels] * 2], delta_rows,
-        [(1, 3, 'Patung'), (4, 15, '3DGS | Ablasi − baseline'), (16, 27, 'SuGaR | Ablasi − baseline')])) )
+        ['Kelas', 'Model ID', 'Nama patung', 'Metode', *['Δ ' + x for x in labels]], delta_rows,
+        [(1, 4, 'Patung dan metode'), (5, 7, 'Selisih kualitas render'),
+         (8, 14, 'Selisih kualitas geometri'), (15, 16, 'Selisih sumber daya')])) )
     notes = [
         ['Cakupan', 'Semua baseline dan ablasi, tidak mengikuti filter tab/metode dashboard. Hanya status COMPLETED; hasil terakhir digabung per patung/metode.'],
         ['Sumber metrik', 'Log evaluasi summary_comparison.csv yang juga digunakan dashboard. Nilai kosong tidak diubah menjadi nol.'],

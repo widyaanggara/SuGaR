@@ -6,19 +6,18 @@ atau ambang geometri yang sedang dipilih. File dibuat di memori; tidak perlu
 memasang paket Excel tambahan pada server.
 
 - **Perbandingan:** selisih ablasi dikurangi baseline, hanya untuk pasangan
-  patung/metode yang memiliki kedua hasil. Satu baris per patung, 3DGS dan SuGaR
-  berdampingan. Selisih bukan ukuran signifikansi statistik.
+  patung/metode yang memiliki kedua hasil. Satu baris per metode: 3DGS lalu SuGaR di bawahnya untuk patung yang sama. Selisih bukan ukuran signifikansi statistik.
 - **Baseline** dan **Studi ablasi:** hasil terakhir berstatus `COMPLETED`,
-  digabung dengan aturan yang sama seperti dashboard. Satu baris per patung;
+  digabung dengan aturan yang sama seperti dashboard. Dua baris per patung jika kedua metode tersedia, 3DGS lalu SuGaR;
   metrik visual, geometri pada ambang 2 dan 5 cm, peak VRAM, waktu tahap, dan
   jumlah gambar dikelompokkan per metode.
 - **Panduan:** sumber data, arti metrik, data yang belum tersedia, dan batasan
   perbandingan waktu maupun kualitas.
 
 Header dan identitas patung dibekukan saat scrolling. Kolom dapat difilter,
-baris diberi warna selang-seling, angka disimpan sebagai angka, dan teks nama
+pasangan baris satu patung diberi warna yang sama, bergantian antarpatung, angka disimpan sebagai angka, dan teks nama
 patung selalu disimpan sebagai teks literal. Nilai `—` berarti belum tersedia,
-bukan nol. Tabel lebar sengaja mempertahankan kedua metode berdampingan.
+bukan nol. Kolom metode membedakan hasil 3DGS dan SuGaR tanpa menggandakan kolom metrik.
 
 Jumlah gambar berasal dari `evaluation/metrics.json` yang cocok dengan nilai
 metrik visual pada laporan. Evaluasi baru menyimpan `registered_images`,

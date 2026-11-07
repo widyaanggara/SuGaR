@@ -573,7 +573,7 @@ test('all seven metric cards show real merged results with method and geometry-t
   app.nodes.get('geometryThreshold').value = '5';
   vm.runInContext('renderMetrics()', app.context);
   assert.equal(app.nodes.get('kpiF1').textContent, '88.89%');
-  assert.match(app.nodes.get('metricsHead').innerHTML, /Precision @5cm/);
+  assert.equal(app.nodes.get('precisionHeader').textContent, 'Precision @5cm (%)');
   app.nodes.get('metricMethod').value = '3DGS';
   vm.runInContext('renderMetrics()', app.context);
   assert.equal(app.nodes.get('kpiPsnr').textContent, '20.00 dB');
@@ -638,7 +638,7 @@ test('polling keeps the actual Log button stable so clicks are not lost while a 
 });
 
 
-test('evaluation tabs show one row per statue and Excel exports all experiments regardless of filters', async () => {
+test('evaluation tabs restore two method rows per statue and Excel exports all experiments regardless of filters', async () => {
   const app = page();
   const base = {Kelas: 'Dewa', 'Model ID': 'model_01', Status: 'COMPLETED'};
   app.setMetrics([
@@ -655,8 +655,7 @@ test('evaluation tabs show one row per statue and Excel exports all experiments 
   assert.doesNotMatch(app.nodes.get('metricsBody').innerHTML, /scaffold_anchor/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /3DGS/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /SuGaR/);
-  assert.equal((app.nodes.get('metricsBody').innerHTML.match(/<tr /g) || []).length, 1);
-  assert.match(app.nodes.get('metricsHead').innerHTML, /colspan="10"/);
+  assert.equal((app.nodes.get('metricsBody').innerHTML.match(/<tr /g) || []).length, 2);
   assert.equal(app.nodes.get('metricsAblation').attributes['aria-pressed'], 'true');
   assert.equal(app.nodes.get('kpiChamfer').textContent, '\u2014');
   app.nodes.get('metricMethod').value = '3DGS';

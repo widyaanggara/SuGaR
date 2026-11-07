@@ -573,7 +573,7 @@ test('all seven metric cards show real merged results with method and geometry-t
   app.nodes.get('geometryThreshold').value = '5';
   vm.runInContext('renderMetrics()', app.context);
   assert.equal(app.nodes.get('kpiF1').textContent, '88.89%');
-  assert.equal(app.nodes.get('precisionHeader').textContent, 'Precision @5cm (%)');
+  assert.match(app.nodes.get('metricsHead').innerHTML, /Precision @5cm/);
   app.nodes.get('metricMethod').value = '3DGS';
   vm.runInContext('renderMetrics()', app.context);
   assert.equal(app.nodes.get('kpiPsnr').textContent, '20.00 dB');
@@ -638,7 +638,7 @@ test('polling keeps the actual Log button stable so clicks are not lost while a 
 });
 
 
-test('evaluation tabs isolate baseline and Scaffold while keeping method labels and columns unchanged', async () => {
+test('evaluation tabs show one row per statue and Excel exports all experiments regardless of filters', async () => {
   const app = page();
   const base = {Kelas: 'Dewa', 'Model ID': 'model_01', Status: 'COMPLETED'};
   app.setMetrics([
@@ -655,6 +655,8 @@ test('evaluation tabs isolate baseline and Scaffold while keeping method labels 
   assert.doesNotMatch(app.nodes.get('metricsBody').innerHTML, /scaffold_anchor/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /3DGS/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /SuGaR/);
+  assert.equal((app.nodes.get('metricsBody').innerHTML.match(/<tr /g) || []).length, 1);
+  assert.match(app.nodes.get('metricsHead').innerHTML, /colspan="10"/);
   assert.equal(app.nodes.get('metricsAblation').attributes['aria-pressed'], 'true');
   assert.equal(app.nodes.get('kpiChamfer').textContent, '\u2014');
   app.nodes.get('metricMethod').value = '3DGS';
@@ -662,8 +664,8 @@ test('evaluation tabs isolate baseline and Scaffold while keeping method labels 
   assert.equal(app.nodes.get('kpiPsnr').textContent, '40.00 dB');
   let exported;
   app.context.window.open = url => {exported = url;};
-  vm.runInContext('exportCSV()', app.context);
-  assert.equal(exported, '/api/metrics.csv?experiment=scaffold_anchor&method=3DGS');
+  vm.runInContext('exportExcel()', app.context);
+  assert.equal(exported, '/api/metrics.xlsx');
   vm.runInContext("setMetricExperiment('baseline')", app.context);
   assert.equal(app.nodes.get('kpiPsnr').textContent, '20.00 dB');
   app.setMetrics([{...base, Metode: '3DGS', 'PSNR (dB)': '20'}]);

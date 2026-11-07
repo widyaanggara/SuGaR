@@ -17,6 +17,7 @@ from pipeline_tools.dataset_registry import (CATALOG, VIDEO_EXTENSIONS, has_chec
 from pipeline_tools.init_dataset_folders import initialize_workspace
 from pipeline_tools.gpu_lock import gpu_lock
 from web_dashboard.job_queue import JobQueue
+from web_dashboard.metrics_export import build_excel
 from pipeline_tools.run_settings import (resolution_settings, colmap_settings, colmap_arguments,
     sugar_settings, sugar_arguments, research_presets)
 from pipeline_tools.colmap_capabilities import inspect_colmap
@@ -309,6 +310,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json(get_metrics_table(self.root))
             elif path == "/api/metrics.csv":
                 self.send_metrics_csv()
+            elif path == "/api/metrics.xlsx":
+                payload = build_excel(get_metrics_table(self.root), self.root)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                self.send_header('Content-Disposition', 'attachment; filename="evaluasi_baseline_dan_ablasi.xlsx"')
+                self.send_header('Content-Length', str(len(payload)))
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(payload)
             elif path in ("/api/logs", "/api/queue"):
                 self.send_json(self.queue.snapshot())
             elif path.startswith('/api/jobs/') and path.endswith('/logs'):

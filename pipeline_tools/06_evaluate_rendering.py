@@ -111,6 +111,8 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
             logger.log(f"[EVAL] {index + 1}/{len(wrapper.test_cam_list)} {camera.image_name}: PSNR={row['psnr']:.4f}")
     metrics = {key: float(np.mean([row[key] for row in values])) for key in ('psnr', 'ssim', 'lpips')}
     report = dict(metrics, method=method, representation='gaussian_splatting' if refined is None else 'sugar_hybrid',
+                  registered_images=len(wrapper.cam_list) + len(wrapper.test_cam_list),
+                  train_images=len(wrapper.cam_list), test_images=len(wrapper.test_cam_list),
                   eval_split_interval=8, white_background=white, per_view=values,
                   lpips_network='vgg', lpips_input_range=[-1, 1],
                   image_downscale=image_downscale, image_max_size=image_max_size,

@@ -775,12 +775,12 @@ async function refreshMetrics() {
   try {
     const rows = (await api('/api/metrics')).filter(row => Object.values(metricMethods).flat().includes(row.Metode));
     const latest = new Map();
-    for (const row of rows) {
+    for (const row of rows.sort((a, b) => (a.Timestamp || '').localeCompare(b.Timestamp || ''))) {
       if (row.Status !== 'COMPLETED') continue;
       const key = [row.Kelas, row['Model ID'], row.Metode].join('/');
       const current = latest.get(key) || {};
       // Training rows, visual evaluation and geometry evaluation stay linked by model/method.
-      const evaluated = ['PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)', 'Precision @2cm (%)', 'Precision @5cm (%)'].some(column => Number.isFinite(parseFloat(row[column])));
+      const evaluated = ['PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)', 'Precision @2cm (%)', 'Precision @5cm (%)', 'Recall @2cm (%)', 'Recall @5cm (%)', 'F1 @2cm (%)', 'F1 @5cm (%)'].some(column => Number.isFinite(parseFloat(row[column])));
       for (const [column, value] of Object.entries(row)) {
         if (evaluated && ['Total Waktu (Menit)', 'Peak VRAM (GB)'].includes(column)) continue;
         if (value !== '-' && value !== '' && value != null) current[column] = value;
@@ -818,9 +818,20 @@ function renderMetrics() {
       .map((row, rowIndex) => ({...row, shadedGroup: groupIndex % 2 === 0, groupStart: rowIndex === 0})));
 
   const precision = `Precision @${threshold}cm (%)`, recall = `Recall @${threshold}cm (%)`, f1 = `F1 @${threshold}cm (%)`;
-  const columns = ['Timestamp', 'Kelas', 'Model ID', 'Metode', 'PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
+  const columns = ['PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
     precision, recall, f1, 'Peak VRAM (GB)', 'Total Waktu (Menit)'];
-  $('metricsBody').innerHTML = display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}${row.groupStart ? ' metric-group-start' : ''}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
+  const visibleMethods = method === 'all' ? ['3DGS', 'SuGaR'] : [method];
+  $('metricsHead').innerHTML = '<tr><th rowspan="2">Kelas</th><th rowspan="2">Patung</th>' +
+    visibleMethods.map(name => `<th colspan="10" class="metric-method-heading">${esc(name)}</th>`).join('') + '</tr><tr>' +
+    visibleMethods.map(() => '<th>Waktu hasil</th>' + columns.map(column => `<th>${esc(column === 'Total Waktu (Menit)' ? 'Training tahap (menit)' : column)}</th>`).join('')).join('') + '</tr>';
+  $('metricsBody').innerHTML = [...modelGroups.values()].map((rows, i) => {
+    const first = rows[0];
+    return `<tr class="${i % 2 === 0 ? 'metric-group-tinted' : 'metric-group-plain'} metric-group-start"><td>${esc(first.Kelas)}</td><td>${modelIdentityHtml(first.Kelas, first['Model ID'], cachedStatus[first.Kelas]?.[first['Model ID']]?.display_name || first['Nama Model'] || defaultModelName(first['Model ID']))}</td>` +
+      visibleMethods.map(name => {
+        const row = rows.find(item => item.Metode === name) || {};
+        return `<td class="metric-method-start" aria-label="${esc(name)}">${esc(row.Timestamp || '-')}</td>` + columns.map(column => `<td>${esc(fmtN(row[column]))}</td>`).join('');
+      }).join('') + '</tr>';
+  }).join('') || `<tr><td colspan="${2 + visibleMethods.length * 10}" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>`;
   for (const [column, target, context, unit, digits, explanation] of [
     ['PSNR (dB)', 'kpiPsnr', 'psnrContext', ' dB', 2, '↑'],
     ['SSIM', 'kpiSsim', 'ssimContext', '', 4, '↑'],
@@ -834,13 +845,10 @@ function renderMetrics() {
     $(context).textContent = `${values.length ? 'Rata-rata ' + values.length + ' hasil' : 'Belum dievaluasi'} · ${explanation}`;
   }
   $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${method === 'all' ? '3DGS + SuGaR' : method}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri ablasi belum tersedia melalui dashboard.'}`;
-  for (const [id, label] of [['precisionHeader', 'Precision'], ['recallHeader', 'Recall'], ['f1Header', 'F1']]) {
-    $(id).textContent = `${label} @${threshold}cm (%)`;
-  }
 }
-function exportCSV() {
+function exportExcel() {
   if (isFilePreview) { showToast(previewMessage); return; }
-  window.open('/api/metrics.csv?experiment=' + metricExperiment + '&method=' + encodeURIComponent($('metricMethod').value || 'all'), '_blank');
+  window.open('/api/metrics.xlsx', '_blank');
 }
 function showToast(message) {
   $('toast').textContent = message;

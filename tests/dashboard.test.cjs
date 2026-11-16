@@ -98,6 +98,62 @@ function page(localPreview = false) {
     setModel(cls, mdl, values) {Object.assign(status[cls][mdl], values);}};
 }
 
+test('delete model opens confirmation without deleting and targets only the selected slot', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  vm.runInContext("openDeleteModel('Dewa', 'model_01')", app.context);
+  assert.equal(app.nodes.get('deleteModelDialog').open, true);
+  assert.equal(app.calls.filter(([url]) => url === '/api/model/delete').length, 0);
+  assert.equal(app.nodes.get('deleteModelCancel').focused, true);
+  await vm.runInContext('deleteModel()', app.context);
+  const calls = app.calls.filter(([url]) => url === '/api/model/delete');
+  assert.deepEqual(calls[0][1], {class_name: 'Dewa', model_id: 'model_01', confirmation: 'Dewa/model_01'});
+  assert.equal(app.nodes.get('deleteModelDialog').open, false);
+});
+
+test('2DGS and RaDe-GS queue with their Python environment and appear in results', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  app.setModel('Penabuh', 'model_01', {colmap_done: true, images_count: 4});
+  await vm.runInContext('refreshStatus(false)', app.context);
+  for (const action of ['2dgs', 'radegs']) {
+    vm.runInContext(`openQueueDialog('Penabuh', 'model_01', '${action}')`, app.context);
+    assert.equal(app.nodes.get('queueExternalOptions').hidden, false);
+    app.nodes.get('queueExternalPython').value = '/env/' + action + '/bin/python';
+    app.nodes.get('queueExternalResolution').value = '2';
+    await vm.runInContext('submitQueueDialog()', app.context);
+    const payload = app.calls.filter(([url]) => url === '/api/run').at(-1)[1];
+    assert.equal(payload.action, action);
+    assert.equal(payload.external_python, '/env/' + action + '/bin/python');
+    assert.equal(payload.external_resolution, 2);
+  }
+  app.setMetrics(['2DGS', 'RaDe-GS'].map(Metode => ({Kelas: 'Penabuh', 'Model ID': 'model_01', Metode, Status: 'COMPLETED', 'PSNR (dB)': 25})));
+  await vm.runInContext('refreshMetrics()', app.context);
+  assert.match(app.nodes.get('metricsBody').innerHTML, /2DGS/);
+  assert.match(app.nodes.get('metricsBody').innerHTML, /RaDe-GS/);
+});
+
+test('full pipeline queues four methods per statue for baseline and Scaffold ablation', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  app.setModel('Penabuh', 'model_01', {images_count: 4});
+  app.setModel('Penabuh', 'model_02', {images_count: 4});
+  await vm.runInContext('refreshStatus(false)', app.context);
+  for (const experiment of ['baseline', 'scaffold_anchor']) {
+    vm.runInContext("openQueueDialog('Penabuh', '', 'full_pipeline')", app.context);
+    app.nodes.get('queueExperiment').value = experiment;
+    app.nodes.get('queuePython2dgs').value = '/env/2dgs/python';
+    app.nodes.get('queuePythonRadegs').value = '/env/radegs/python';
+    await vm.runInContext('submitQueueDialog()', app.context);
+    const payload = app.calls.filter(([url]) => url === '/api/run').at(-1)[1];
+    assert.equal(payload.include_external, true);
+    assert.equal(payload.experiment, experiment);
+    assert.equal(payload.python_2dgs, '/env/2dgs/python');
+    assert.equal(payload.python_radegs, '/env/radegs/python');
+    assert.equal(payload.model_id, '');
+  }
+});
+
 test('queue popup styles are bundled in the HTML so missing CSS routes cannot strip its layout', () => {
   const html = fs.readFileSync('web_dashboard/index.html', 'utf8');
   const styles = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');

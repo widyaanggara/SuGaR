@@ -15,9 +15,12 @@ def initialize_workspace(base_dir=PROJECT_ROOT):
             folder.mkdir(parents=True, exist_ok=True)
             (folder / ".gitkeep").touch(exist_ok=True)
         for method, subdirs in {"3dgs": ("point_cloud", "evaluation"),
+                               "2dgs": ("point_cloud", "evaluation"),
+                               "radegs": ("point_cloud", "evaluation"),
                                "sugar": ("coarse", "mesh", "refined", "textured_mesh", "evaluation")}.items():
             for sub in subdirs:
                 (base_dir / "outputs" / method / cls / mdl / sub).mkdir(parents=True, exist_ok=True)
+                (base_dir / 'outputs/ablations/scaffold_anchor' / method / cls / mdl / sub).mkdir(parents=True, exist_ok=True)
     for sub in ("logs/training_logs", "logs/evaluation_reports", "queue/logs", "locks"):
         (base_dir / "outputs" / sub).mkdir(parents=True, exist_ok=True)
     return len(scene_pairs())

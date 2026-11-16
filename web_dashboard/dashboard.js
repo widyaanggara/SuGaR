@@ -9,22 +9,63 @@ let lastQueueSignature = null;
 let lastGridSignature = null;
 let cachedMetrics = [];
 let metricExperiment = 'baseline';
-const metricMethods = {baseline: ['3DGS', 'SuGaR'], scaffold_anchor: ['3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor']};
+const metricMethods = {baseline: ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'], scaffold_anchor: ['3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor', '2DGS_scaffold_anchor', 'RaDe-GS_scaffold_anchor']};
 let editingModel = null;
 let modelNameSaving = false;
+let deletingModel = null;
+let modelDeleting = false;
+
+function openDeleteModel(cls, mdl) {
+  if (isFilePreview || modelDeleting || !cachedStatus[cls]?.[mdl]) return;
+  deletingModel = {class_name: cls, model_id: mdl};
+  $('deleteModelTarget').textContent = `${modelName(cls, mdl)} — ${cls}/${mdl}`;
+  $('deleteModelError').textContent = '';
+  $('deleteModelDialog').showModal();
+  $('deleteModelCancel').focus();
+}
+
+function closeDeleteModel() {
+  if (modelDeleting) return;
+  $('deleteModelDialog').close();
+  deletingModel = null;
+}
+
+async function deleteModel() {
+  if (!deletingModel || modelDeleting) return;
+  const target = deletingModel;
+  const confirmation = `${target.class_name}/${target.model_id}`;
+  modelDeleting = true;
+  for (const id of ['deleteModelSubmit', 'deleteModelCancel']) $(id).disabled = true;
+  $('deleteModelError').textContent = 'Menghapus data, tunggu hingga selesai...';
+  try {
+    const result = await api('/api/model/delete', {...target, confirmation});
+    geometryInputs.clear();
+    selectedLogId = null;
+    selectedLogRequest++;
+    $('deleteModelDialog').close();
+    deletingModel = null;
+    showToast(result.message);
+    await refreshAll();
+  } catch (error) {
+    $('deleteModelError').textContent = error.message;
+  } finally {
+    modelDeleting = false;
+    for (const id of ['deleteModelSubmit', 'deleteModelCancel']) $(id).disabled = false;
+  }
+}
 let queueSelection = null;
 let selectedQueueAction = 'full_pipeline';
 let queueSubmitting = false;
 let calibrationSaving = false;
 const geometryInputs = new Map();
-const queueActions = ['full_pipeline', 'colmap', '3dgs', 'sugar', 'evaluate_visual', 'evaluate', 'extract_frames'];
+const queueActions = ['full_pipeline', 'colmap', '3dgs', 'sugar', '2dgs', 'radegs', 'evaluate_visual', 'evaluate', 'extract_frames'];
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtN = value => Number.isFinite(parseFloat(value)) ? parseFloat(value).toFixed(4) : '-';
 const fmtSec = seconds => [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, Math.floor(seconds) % 60].map(n => String(n).padStart(2, '0')).join(':');
 const actionLabel = action => ({full_pipeline: 'Pipeline lengkap', colmap: 'Rekonstruksi COLMAP',
-  '3dgs': 'Training 3DGS', sugar: 'Training SuGaR', extract_frames: 'Ekstraksi frame',
+  '2dgs': '2DGS + evaluasi', radegs: 'RaDe-GS + evaluasi', '3dgs': 'Training 3DGS', sugar: 'Training SuGaR', extract_frames: 'Ekstraksi frame',
   evaluate_visual: 'Evaluasi visual', evaluate: 'Evaluasi geometri'}[action] || action || '');
 const settingsTabs = ['resolution', 'colmap', 'training', 'lidar'];
 const isFilePreview = window.location?.protocol === 'file:' || window.location?.search === '?preview=1';
@@ -335,13 +376,17 @@ function renderGrid(data) {
       const target = `'${cls}','${mdl}'`;
       const modelLabel = info.display_name || defaultModelName(mdl);
       cells += `<div class="model-cell">
-        <div class="model-label"><div class="model-identity"><span class="model-title">${esc(modelLabel)}</span><span class="model-code">${esc(mdl)}</span></div><div class="model-tools">${info.has_video ? chip(true, 'Video') : ''}<button type="button" class="btn-name" aria-label="Ubah nama ${esc(cls)} ${esc(mdl)}" onclick="editModelName(${target})">Ubah nama</button></div></div>
+        <div class="model-label"><div class="model-identity"><span class="model-title">${esc(modelLabel)}</span><span class="model-code">${esc(mdl)}</span></div><div class="model-tools">${info.has_video ? chip(true, 'Video') : ''}<button type="button" class="btn-name" aria-label="Ubah nama ${esc(cls)} ${esc(mdl)}" onclick="editModelName(${target})">Ubah nama</button><button type="button" class="btn-name btn-delete-model" aria-label="Hapus data ${esc(cls)} ${esc(mdl)}" title="Hapus data patung" onclick="openDeleteModel(${target})" ${isFilePreview ? 'disabled' : ''}><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 11H7L6 9Z"/><path class="trash-slots" d="M10 11v6m4-6v6"/></svg></button></div></div>
         <div class="pipeline-rows">
           <div class="pipeline-row"><span><span class="stage-index">01</span>Foto input</span>${chip(info.images_count > 0, `${info.images_count} foto`, 'Belum ada foto')}</div>
           <div class="pipeline-row"><span><span class="stage-index">02</span>COLMAP</span>${chip(info.colmap_done)}</div>
           <div class="pipeline-row"><span><span class="stage-index">03</span>3DGS</span>${chip(info['3dgs_30k'], '30k iter', info['3dgs_7k'] ? '7k iter' : 'Menunggu')}</div>
           <div class="pipeline-row"><span><span class="stage-index">04</span>SuGaR + OBJ</span>${chip(info.sugar_obj, 'OBJ lengkap', info.sugar_mesh ? 'Mesh kasar' : 'Menunggu')}</div>
-          <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual</span>${chip(info.evaluated)}</div>
+          <div class="pipeline-row"><span>2DGS</span>${chip(info.external_methods?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_methods?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span>RaDe-GS</span>${chip(info.external_methods?.radegs?.evaluated, 'Evaluasi tersedia', info.external_methods?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span>Ablasi 2DGS</span>${chip(info.external_ablations?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_ablations?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span>Ablasi RaDe-GS</span>${chip(info.external_ablations?.radegs?.evaluated, 'Evaluasi tersedia', info.external_ablations?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual (4 metode)</span>${chip(info.evaluated)}</div>
           <div class="pipeline-row"><span><span class="stage-index">06</span>Evaluasi geometri</span>${chip(info.geometry_evaluated, '2 metode selesai', !info.has_gt_lidar ? 'Perlu LiDAR' : !info.geometry_settings ? 'Atur LiDAR' : 'Menunggu')}</div>
         </div>
         <details class="dataset-path"><summary>Lihat folder input &amp; output</summary><code>${esc(info.input_path)}</code><code>${esc(info.output_path)}</code><code>${esc(`datasets/${cls}/${mdl}/ground_truth/lidar.ply`)}</code></details>
@@ -404,7 +449,7 @@ function changeQueueTarget(classChanged) {
   queueSelection = {class_name: $('queueClass').value, model_id: $('queueModel').value};
   renderQueueTargets();
   const single = !!queueSelection.class_name && !!queueSelection.model_id;
-  chooseQueueAction(!single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(selectedQueueAction)
+  chooseQueueAction(!single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(selectedQueueAction)
     ? 'full_pipeline' : selectedQueueAction);
 }
 
@@ -457,13 +502,13 @@ function chooseQueueAction(action) {
   if (!queueActions.includes(action) || queueSubmitting || calibrationSaving) return;
   const single = !!queueSelection?.class_name && !!queueSelection?.model_id;
   $('queueProcessOptions').dataset.scope = single ? 'single' : 'bulk';
-  if (!single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(action)) return;
+  if (!single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(action)) return;
   selectedQueueAction = action;
   for (const name of queueActions) {
     const button = $('queue-action-' + name);
     button.setAttribute('aria-pressed', String(name === action));
-    button.disabled = !single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(name);
-    button.hidden = !single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(name);
+    button.disabled = !single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(name);
+    button.hidden = !single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(name);
   }
   $('queue-action-extract_frames').hidden = !single || !selectedModelPairs()[0]?.info.has_video;
   const evaluation = ['evaluate_visual', 'evaluate'].includes(action);
@@ -471,9 +516,11 @@ function chooseQueueAction(action) {
   $('queueGeometryOptions').hidden = action !== 'evaluate';
   $('queuePipelineOptions').hidden = action !== 'full_pipeline';
   $('queueActionHelp').textContent = {
-    full_pipeline: 'Mengikuti pengaturan eksperimen hingga evaluasi visual. Evaluasi geometri dijalankan terpisah setelah scan LiDAR tersedia.',
+    full_pipeline: 'Per patung: COLMAP → 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi visual semua metode, baru patung berikutnya. Evaluasi geometri dijalankan terpisah setelah scan LiDAR tersedia.',
     colmap: 'Menghitung fitur, pencocokan, pose kamera, dan undistorsi dari foto input.',
     '3dgs': 'Melatih baseline 3DGS dari dataset COLMAP yang sudah tersedia.',
+    '2dgs': 'Training 2DGS 30.000 iterasi, render, mesh, dan evaluasi visual. Jalankan COLMAP dahulu. Checkpoint lengkap dipakai kembali jika Lewati tahap yang selesai aktif.',
+    radegs: 'Training RaDe-GS 30.000 iterasi, render, evaluasi visual, dan mesh. Jalankan COLMAP dahulu. Checkpoint lengkap dipakai kembali jika Lewati tahap yang selesai aktif.',
     sugar: 'Menjalankan SuGaR menggunakan checkpoint 3DGS 7.000 iterasi yang sudah tersedia.',
     evaluate_visual: 'Menghitung PSNR, SSIM, dan LPIPS dari checkpoint yang ada. Tidak menjalankan training ulang.',
     evaluate: 'Menghitung Chamfer, Precision, Recall, dan F1 bersama pada ambang 2 cm dan 5 cm, tanpa training ulang.',
@@ -494,10 +541,10 @@ function queuePlan() {
       if (action === 'full_pipeline' && !info.images_count && !info.has_video) reason = 'foto/video belum tersedia';
       if (action === 'full_pipeline' && $('queuePipelineStart').value === 'existing_colmap' && !info.colmap_done) reason = 'images/ hasil undistorsi dan sparse/0 COLMAP belum lengkap';
       if (action === 'colmap' && !info.images_count) reason = 'foto input belum tersedia';
-      if (action === '3dgs' && !info.colmap_done) reason = 'hasil COLMAP belum lengkap';
+      if (['3dgs', '2dgs', 'radegs'].includes(action) && !info.colmap_done) reason = 'hasil COLMAP belum lengkap';
       if (action === 'sugar' && (!info.colmap_done || !info['3dgs_7k'])) reason = 'COLMAP dan checkpoint 3DGS 7k diperlukan';
       if (action === 'extract_frames' && (!info.has_video || info.input_count > 0)) reason = 'perlu video dan folder input kosong';
-      if (action === 'evaluate_visual' && !(method === '3DGS' ? info['3dgs_30k'] : info['3dgs_7k'] && info.sugar_obj)) reason = `checkpoint ${method} belum lengkap`;
+      if (action === 'evaluate_visual' && !(method === '2DGS' ? info.external_methods?.['2dgs']?.trained : method === 'RaDe-GS' ? info.external_methods?.radegs?.trained : method === '3DGS' ? info['3dgs_30k'] : info['3dgs_7k'] && info.sugar_obj)) reason = `checkpoint ${method} belum lengkap`;
       if (action === 'evaluate') {
         const inputs = geometryInputs.get(`${cls}/${mdl}`);
         const text = inputs?.scale.value.trim() || '';
@@ -536,15 +583,16 @@ function updateQueuePlan() {
   $('queueSaveCalibration').disabled = isFilePreview || busy || invalidScale || !selectedInputs.some(inputs => inputs.unit.value && (!manual || Number(inputs.scale.value) > 0));
   $('queueMethod').disabled = busy;
   $('queuePipelineStart').disabled = busy;
+  $('queueExternalOptions').hidden = !(['2dgs', 'radegs'].includes(selectedQueueAction) || (selectedQueueAction === 'evaluate_visual' && ['2DGS', 'RaDe-GS'].includes($('queueMethod').value)));
   const scaffoldSelected = $('queueExperiment').value === 'scaffold_anchor';
   $('queueScaffoldOptions').hidden = !scaffoldSelected;
   $('queueExperiment').disabled = busy;
   for (const id of ['queueScaffoldRepo', 'queueScaffoldPython', 'queueScaffoldIterations', 'queueScaffoldResolution']) $(id).disabled = busy;
   $('queuePipelineHelp').textContent = $('queuePipelineStart').value === 'existing_colmap'
-    ? 'Memakai images/ dan sparse/0 yang sudah ada, termasuk hasil dari komputer lain. Langsung menjalankan 3DGS → SuGaR → evaluasi visual. COLMAP tidak dijalankan ulang; target yang belum lengkap dilewati. Pengaturan resolusi training tetap berlaku.'
+    ? 'Memakai images/ dan sparse/0 yang sudah ada, termasuk hasil dari komputer lain. Per patung: 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi semua metode. COLMAP tidak dijalankan ulang; target yang belum lengkap dilewati. Pengaturan resolusi training tetap berlaku.'
     : 'Dengan Lewati tahap yang selesai aktif, setiap model melanjutkan dari hasil terakhir yang tersedia. COLMAP lengkap, termasuk hasil teman, langsung dipakai. Training dan evaluasi yang lengkap serta cocok dilewati; checkpoint parsial yang cocok dipulihkan. Pengaturan COLMAP diterapkan hanya saat membuat COLMAP baru. Untuk interrupted, gunakan Antrekan Ulang agar pengaturan asli dan prioritas pemulihannya dipertahankan.';
   $('queueApplyIcp').disabled = busy;
-  if (scaffoldSelected) $('queuePipelineHelp').textContent = 'COLMAP → Scaffold-GS → anchor dengan warna COLMAP → 3DGS → SuGaR → evaluasi. Output ablasi terpisah. Tahap Scaffold yang terputus dimulai ulang; tahap Scaffold yang selesai dan cocok dilewati.';
+  if (scaffoldSelected) $('queuePipelineHelp').textContent = 'Per patung: COLMAP → Scaffold-GS → anchor bersama → 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi semua metode. Output ablasi terpisah. Tahap Scaffold yang terputus dimulai ulang; tahap Scaffold yang selesai dan cocok dilewati.';
   $('queueAlignment').disabled = busy;
   $('queueClass').disabled = busy;
   $('queueModel').disabled = busy || !queueSelection.class_name;
@@ -558,7 +606,7 @@ function updateQueuePlan() {
   }
   const single = !!queueSelection.class_name && !!queueSelection.model_id;
   for (const action of queueActions) $('queue-action-' + action).disabled = busy ||
-    (!single && !['full_pipeline', 'evaluate_visual', 'evaluate'].includes(action));
+    (!single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(action));
 }
 
 async function persistQueueCalibration() {
@@ -596,6 +644,11 @@ async function submitQueueDialog() {
   const payload = {...readExperimentSettings(), ...queueSelection, action,
     pipeline_start: action === 'full_pipeline' ? $('queuePipelineStart').value : 'auto',
     experiment: action === 'full_pipeline' ? $('queueExperiment').value : 'baseline',
+    include_external: true,
+    python_2dgs: ($('queuePython2dgs').value || '').trim(),
+    python_radegs: ($('queuePythonRadegs').value || '').trim(),
+    external_python: ($('queueExternalPython').value || '').trim(),
+    external_resolution: Number($(action === 'full_pipeline' ? 'queueFullResolution' : 'queueExternalResolution').value || 1),
     scaffold_repo: $('queueScaffoldRepo').value.trim(),
     scaffold_python: $('queueScaffoldPython').value.trim(),
     scaffold_iterations: Number($('queueScaffoldIterations').value),
@@ -814,7 +867,7 @@ function renderMetrics() {
     modelGroups.get(key).push(row);
   }
   const display = [...modelGroups.values()].flatMap((rows, groupIndex) =>
-    rows.sort((a, b) => ['3DGS', 'SuGaR'].indexOf(a.Metode) - ['3DGS', 'SuGaR'].indexOf(b.Metode))
+    rows.sort((a, b) => ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'].indexOf(a.Metode) - ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'].indexOf(b.Metode))
       .map((row, rowIndex) => ({...row, shadedGroup: groupIndex % 2 === 0, groupStart: rowIndex === 0})));
 
   const precision = `Precision @${threshold}cm (%)`, recall = `Recall @${threshold}cm (%)`, f1 = `F1 @${threshold}cm (%)`;
@@ -833,7 +886,7 @@ function renderMetrics() {
     $(target).textContent = values.length ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(digits) + unit : '—';
     $(context).textContent = `${values.length ? 'Rata-rata ' + values.length + ' hasil' : 'Belum dievaluasi'} · ${explanation}`;
   }
-  $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${method === 'all' ? '3DGS + SuGaR' : method}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri ablasi belum tersedia melalui dashboard.'}`;
+  $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${method === 'all' ? '3DGS + SuGaR + 2DGS + RaDe-GS' : method}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri ablasi belum tersedia melalui dashboard.'}`;
   for (const [id, label] of [['precisionHeader', 'Precision'], ['recallHeader', 'Recall'], ['f1Header', 'F1']]) {
     $(id).textContent = `${label} @${threshold}cm (%)`;
   }

@@ -153,6 +153,10 @@ def save_geometry_scales(entries, root=PROJECT_ROOT):
 
 
 def geometry_model_path(root, cls, mdl, method):
+    if method in ('2DGS', 'RaDe-GS'):
+        from pipeline_tools.external_methods import mesh_path
+        key = method.replace('-', '').lower()
+        return mesh_path(Path(root) / 'outputs' / key / cls / mdl, key)
     if method not in METHODS:
         raise ValueError('Metode geometri harus 3DGS atau SuGaR.')
     output = Path(root) / 'outputs' / method.lower() / cls / mdl
@@ -183,7 +187,7 @@ def geometry_result_current(root, cls, mdl, method, scale, options=None):
     if scale is None and options is None:
         return False
     try:
-        output = Path(root) / 'outputs' / method.lower() / cls / mdl
+        output = Path(root) / 'outputs' / method.replace('-', '').lower() / cls / mdl
         report = json.loads((output / 'geometry/metrics.json').read_text(encoding='utf-8'))
         gt = Path(root) / 'datasets' / cls / mdl / 'ground_truth/lidar.ply'
         metrics = ('chamfer_distance_cm',) + tuple(f'{name}_at_{threshold}cm_pct'

@@ -6,6 +6,7 @@ import json
 import mimetypes
 import subprocess
 import sys
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, unquote, parse_qs
@@ -17,6 +18,8 @@ from pipeline_tools.dataset_registry import (CATALOG, VIDEO_EXTENSIONS, has_chec
 from pipeline_tools.init_dataset_folders import initialize_workspace
 from pipeline_tools.gpu_lock import gpu_lock
 from web_dashboard.job_queue import JobQueue
+from web_dashboard.model_cleanup import delete_model_data
+from pipeline_tools.external_methods import METHODS as EXTERNAL_METHODS, trained, visual_metrics, output_base
 from web_dashboard.metrics_export import build_excel
 from pipeline_tools.run_settings import (resolution_settings, colmap_settings, colmap_arguments,
     sugar_settings, sugar_arguments, research_presets)
@@ -43,6 +46,10 @@ def get_project_status(root=PROJECT_ROOT):
         dgs_done = has_checkpoint(dgs, 30000)
         sugar_done = has_sugar_result(sugar)
         evaluated = all(has_evaluation(out) for out in (dgs, sugar))
+        external_status = {key: {'trained': trained(root / 'outputs' / key / cls / mdl),
+            'evaluated': bool(visual_metrics(root / 'outputs' / key / cls / mdl))} for key in EXTERNAL_METHODS}
+        all_trained = dgs_done and sugar_done and all(value['trained'] for value in external_status.values())
+        all_evaluated = evaluated and all(value['evaluated'] for value in external_status.values())
         scale = scales.get(cls, {}).get(mdl)
         options = geometry_settings.get(cls, {}).get(mdl)
         geometry_methods = {method: geometry_result_current(root, cls, mdl, method, scale, options)
@@ -56,26 +63,41 @@ def get_project_status(root=PROJECT_ROOT):
             "geometry_scale_factor": scale,
             "geometry_settings": options,
             "geometry_sources": {method: geometry_source_ready(root, cls, mdl, method)
-                                 for method in ('3DGS', 'SuGaR')},
+                                 for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')},
             "geometry_methods": geometry_methods, "geometry_evaluated": all(geometry_methods.values()),
             "colmap_done": has_colmap_model(scene), "3dgs_7k": has_checkpoint(dgs, 7000),
             "3dgs_30k": dgs_done, "sugar_mesh": any((sugar / "mesh").glob("*.ply")),
-            "sugar_obj": sugar_done, "evaluated": evaluated,
+            "sugar_obj": sugar_done, "evaluated": all_evaluated,
+            "external_methods": external_status,
+            "external_ablations": {key: {'trained': trained(output_base(root, 'scaffold_anchor') / key / cls / mdl),
+                'evaluated': bool(visual_metrics(output_base(root, 'scaffold_anchor') / key / cls / mdl))}
+                for key in EXTERNAL_METHODS},
             "input_path": f"datasets/{cls}/{mdl}/input/",
-            "output_path": f"outputs/{{3dgs,sugar}}/{cls}/{mdl}/",
-            "overall_status": "Completed" if dgs_done and sugar_done and evaluated else
-                              "Trained" if dgs_done and sugar_done else
+            "output_path": f"outputs/{{3dgs,sugar,2dgs,radegs}}/{cls}/{mdl}/",
+            "overall_status": "Completed" if all_trained and all_evaluated else
+                              "Trained" if all_trained else
                               "Ready" if input_count or image_count or has_video else "No Data"}
     return result
 
 
 def get_metrics_table(root=PROJECT_ROOT):
     path = Path(root) / "outputs/logs/evaluation_reports/summary_comparison.csv"
-    if not path.is_file():
-        return []
     names = read_model_names(root)
-    with path.open(encoding="utf-8", newline="") as stream:
-        rows = list(csv.DictReader(stream))
+    rows = []
+    if path.is_file():
+        with path.open(encoding="utf-8", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+    # Imported native outputs are visible even before a local evaluation is queued.
+    for cls, mdl in scene_pairs():
+        for key, (label, _) in EXTERNAL_METHODS.items():
+            for experiment in ('baseline', 'scaffold_anchor'):
+                output = output_base(root, experiment) / key / cls / mdl
+                values = visual_metrics(output)
+                if values and trained(output):
+                    rows.append({'Kelas': cls, 'Model ID': mdl,
+                        'Metode': label + ('_scaffold_anchor' if experiment == 'scaffold_anchor' else ''), 'Status': 'COMPLETED',
+                        'Timestamp': datetime.fromtimestamp((output / 'results.json').stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                        'PSNR (dB)': values['PSNR'], 'SSIM': values['SSIM'], 'LPIPS': values['LPIPS']})
     for row in rows:
         row['Nama Model'] = model_display_name(row.get('Kelas', ''), row.get('Model ID', ''), names)
     return rows
@@ -84,8 +106,8 @@ def get_metrics_table(root=PROJECT_ROOT):
 def get_preview_images(cls, mdl, root=PROJECT_ROOT):
     scene_pairs(cls, mdl)
     items = []
-    for method in ("3dgs", "sugar"):
-        folder = Path(root) / "outputs" / method / cls / mdl / "evaluation" / "renders"
+    for method in ("3dgs", "sugar", "2dgs", "radegs"):
+        folder = Path(root) / "outputs" / method / cls / mdl / ('test/ours_30000/renders' if method in EXTERNAL_METHODS else 'evaluation/renders')
         for index, path in enumerate(media_files(folder)[:3]):
             items.append({"src": "/static/" + path.relative_to(root).as_posix(),
                           "label": f"{method} test view #{index + 1}", "type": method})
@@ -102,10 +124,25 @@ def build_command(job, root=PROJECT_ROOT):
     settings = resolution_settings(job)
     image_args = ['--image_downscale', str(settings['image_downscale']),
                   '--image_max_size', str(settings['image_max_size'])]
+    external_method = action if action in EXTERNAL_METHODS else {
+        '2DGS': '2dgs', 'RaDe-GS': 'radegs'}.get(job.get('evaluation_method')) if action == 'evaluate_visual' else None
+    if external_method:
+        args = [sys.executable, '-u', str(root / 'pipeline_tools/run_external_method.py'),
+                '--method', external_method, *common, *gpu, '--python', job.get('external_python') or sys.executable,
+                '--resolution', str(job.get('external_resolution', 1))]
+        if action == 'evaluate_visual':
+            args.append('--evaluate_only')
+        if job.get('resume', True) is False:
+            args.append('--no_resume')
+        return args
     if action == "full_pipeline":
         script = "batch_run_all.py"
         args = ["--class_name", cls, "--model_id", mdl, *gpu,
                 *sugar_arguments(job)]
+        if job.get('include_external', False):
+            args.extend(['--include_external', '--python_2dgs', job.get('python_2dgs') or sys.executable,
+                         '--python_radegs', job.get('python_radegs') or sys.executable,
+                         '--external_resolution', str(job.get('external_resolution', 1))])
         if not job.get("resume", True):
             args.append("--no_resume")
         if job.get('pipeline_start') == 'existing_colmap':
@@ -183,7 +220,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
             raise ValueError('Downscale Scaffold harus 1, 2, 4, atau 8.')
         scaffold = dict(scaffold_repo=str(Path(repo).resolve()), scaffold_python=python,
                         scaffold_iterations=iterations, scaffold_resolution=resolution)
-    if action not in {"full_pipeline", "extract_frames", "colmap", "3dgs", "sugar", "evaluate", "evaluate_visual"}:
+    if action not in {"full_pipeline", "extract_frames", "colmap", "3dgs", "sugar", "2dgs", "radegs", "evaluate", "evaluate_visual"}:
         raise ValueError("Tahap pipeline tidak dikenal.")
     pipeline_start = data.get('pipeline_start', 'auto')
     if not isinstance(pipeline_start, str) or pipeline_start not in ('auto', 'existing_colmap'):
@@ -193,7 +230,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     cls, mdl = data.get("class_name", ""), data.get("model_id", "")
     if not isinstance(cls, str) or not isinstance(mdl, str):
         raise ValueError("Kelas dan model harus berupa teks.")
-    if action not in {"full_pipeline", "evaluate_visual", "evaluate"} and (not cls or not mdl):
+    if action not in {"full_pipeline", "2dgs", "radegs", "evaluate_visual", "evaluate"} and (not cls or not mdl):
         raise ValueError("Pilih satu kelas dan satu model untuk tahap ini.")
     pairs = scene_pairs(cls, mdl)
     settings = {**resolution_settings(data), **colmap_settings(data), **sugar_settings(data)}
@@ -215,10 +252,30 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     if refinement not in {"short", "medium", "long"}:
         raise ValueError("Refinement harus short, medium, atau long.")
     method = data.get("evaluation_method", "SuGaR")
-    allowed_methods = {'3DGS', 'SuGaR', 'both'} if action in {'evaluate_visual', 'evaluate'} else {'3DGS', 'SuGaR'}
+    allowed_methods = {'3DGS', 'SuGaR', '2DGS', 'RaDe-GS', 'both'} if action in {'evaluate_visual', 'evaluate'} else {'3DGS', 'SuGaR'}
     if not isinstance(method, str) or method not in allowed_methods:
         raise ValueError("Metode evaluasi harus 3DGS, SuGaR, atau keduanya untuk evaluasi.")
     methods = ('3DGS', 'SuGaR') if method == 'both' else (method,)
+    external_python = data.get('external_python') or sys.executable
+    external_resolution = data.get('external_resolution', 1)
+    include_external = data.get('include_external', True)
+    if not isinstance(include_external, bool):
+        raise ValueError('Pilihan pipeline empat metode harus boolean.')
+    python_2dgs = data.get('python_2dgs') or sys.executable
+    python_radegs = data.get('python_radegs') or sys.executable
+    for value in (python_2dgs, python_radegs):
+        if not isinstance(value, str) or '\x00' in value:
+            raise ValueError('Python metode harus berupa path executable.')
+    if not isinstance(external_python, str) or '\x00' in external_python:
+        raise ValueError('Python metode harus berupa path executable.')
+    if type(external_resolution) is not int or external_resolution not in (1, 2, 4, 8):
+        raise ValueError('Downscale metode harus 1, 2, 4, atau 8.')
+    external_key = action if action in EXTERNAL_METHODS else {'2DGS': '2dgs', 'RaDe-GS': 'radegs'}.get(method)
+    if external_key and action != 'evaluate':
+        if not Path(external_python).is_file():
+            raise ValueError('Isi path lengkap Python environment metode pada server.')
+        if not (Path(root) / 'external' / EXTERNAL_METHODS[external_key][1] / 'train.py').is_file():
+            raise ValueError('Clone repository metode ke external/ terlebih dahulu.')
     apply_icp = data.get('apply_icp', True)
     if not isinstance(apply_icp, bool):
         raise ValueError('Pilihan ICP harus berupa boolean.')
@@ -241,6 +298,9 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                                  for cls, _ in pairs}
     jobs, skipped = [], []
     for cls, mdl in pairs:
+        if action in EXTERNAL_METHODS and not has_colmap_model(Path(root) / 'datasets' / cls / mdl):
+            skipped.append(f'{cls}/{mdl}: jalankan COLMAP terlebih dahulu')
+            continue
         if action == "full_pipeline" and not has_data(Path(root) / "datasets" / cls / mdl):
             skipped.append(f"{cls}/{mdl}")
             continue
@@ -266,12 +326,16 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                 baseline = Path(root) / 'outputs/3dgs' / cls / mdl
                 ready = (has_checkpoint(baseline, 30000) if current_method == '3DGS' else
                          has_checkpoint(baseline, 7000) and has_sugar_result(Path(root) / 'outputs/sugar' / cls / mdl))
+                if current_method in ('2DGS', 'RaDe-GS'):
+                    ready = trained(Path(root) / 'outputs' / current_method.replace('-', '').lower() / cls / mdl)
                 if not ready:
                     reason = f'checkpoint evaluasi {current_method} belum lengkap'
             if reason:
                 skipped.append(f'{cls}/{mdl} ({current_method}): {reason}')
                 continue
             jobs.append(dict(action=action, class_name=cls, model_id=mdl, gpu=gpu,
+                             include_external=include_external, python_2dgs=python_2dgs, python_radegs=python_radegs,
+                             external_python=external_python, external_resolution=external_resolution,
                              experiment=experiment, **scaffold,
                              pipeline_start=pipeline_start,
                              resume=data.get("resume", True) is True,
@@ -354,7 +418,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if not isinstance(data, dict):
                 raise ValueError("Body harus berupa objek JSON.")
-            if path == '/api/geometry-scales':
+            if path == '/api/model/delete':
+                self.send_json(delete_model_data(self.queue, data))
+            elif path == '/api/geometry-scales':
                 self.send_json({'scales': save_geometry_scales(data.get('scales'), self.root)})
             elif path == '/api/geometry-settings':
                 self.send_json({'settings': save_geometry_settings(data.get('settings'), self.root)})
@@ -397,15 +463,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         query = parse_qs(urlparse(self.path).query)
         experiment = query.get('experiment', ['all'])[0]
         method = query.get('method', ['all'])[0]
-        if experiment not in ('all', 'baseline', 'scaffold_anchor') or method not in ('all', '3DGS', 'SuGaR'):
+        if experiment not in ('all', 'baseline', 'scaffold_anchor') or method not in ('all', '3DGS', 'SuGaR', '2DGS', 'RaDe-GS'):
             self.send_json({'error': 'Filter evaluasi tidak valid.'}, 400)
             return
-        path = self.root / 'outputs/logs/evaluation_reports/summary_comparison.csv'
-        if not path.is_file():
+        rows = get_metrics_table(self.root)
+        if not rows:
             self.send_error(404)
             return
-        with path.open(encoding='utf-8', newline='') as stream:
-            fields = list(csv.DictReader(stream).fieldnames or [])
+        fields = list(dict.fromkeys(key for row in rows for key in row))
         if 'Nama Model' not in fields:
             fields.append('Nama Model')
         text = io.StringIO(newline='')
@@ -413,8 +478,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         writer.writeheader()
         for row in get_metrics_table(self.root):
             row_method = row.get('Metode', '')
-            allowed = {'baseline': ('3DGS', 'SuGaR'),
-                       'scaffold_anchor': ('3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor')}
+            allowed = {'baseline': ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS'),
+                       'scaffold_anchor': ('3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor', '2DGS_scaffold_anchor', 'RaDe-GS_scaffold_anchor')}
             if experiment != 'all' and row_method not in allowed[experiment]:
                 continue
             if method != 'all' and row_method not in (method, method + '_scaffold_anchor'):

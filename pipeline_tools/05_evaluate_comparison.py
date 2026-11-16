@@ -163,7 +163,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluasi kuantitatif komparasi 3DGS vs SuGaR untuk Skripsi.")
     parser.add_argument("--statue_class", "-c", type=str, required=True, help="Nama kelas patung (misal: Dewa).")
     parser.add_argument("--model_id", "-m", type=str, required=True, help="ID model patung (misal: model_01).")
-    parser.add_argument("--method", type=str, default="SuGaR", choices=["3DGS", "SuGaR"], help="Metode yang dievaluasi.")
+    parser.add_argument("--method", type=str, default="SuGaR", choices=["3DGS", "SuGaR", "2DGS", "RaDe-GS"], help="Metode yang dievaluasi.")
     parser.add_argument("--model_path", "-p", type=str, required=True, help="Path ke file model (.ply atau .obj).")
     parser.add_argument("--gt_lidar", "-g", type=str, default=None, help="Path ke point cloud LiDAR ground truth (.ply).")
     parser.add_argument("--scale_factor", type=float, default=None,
@@ -218,7 +218,7 @@ def main():
     # 1. Evaluasi Geometri jika ada Ground Truth LiDAR
     if args.gt_lidar:
         logger.start_stage("Evaluasi_Geometri_LiDAR")
-        aligned_out = (PROJECT_ROOT / 'outputs' / args.method.lower() / args.statue_class /
+        aligned_out = (PROJECT_ROOT / 'outputs' / args.method.replace("-", "").lower() / args.statue_class /
                        args.model_id / 'geometry/aligned_reconstruction.ply')
         try:
             logger.log('Mencari skala, rotasi dan posisi otomatis (Sim(3)); periksa overlay hasilnya.' if args.auto_align
@@ -257,7 +257,7 @@ def main():
                 geometry_options=dict(lidar_unit=args.lidar_unit,
                     alignment_mode='automatic' if args.auto_align else 'manual',
                     **({} if args.auto_align else {'scale_factor': args.scale_factor})))
-            geometry_dir = PROJECT_ROOT / 'outputs' / args.method.lower() / args.statue_class / args.model_id / 'geometry'
+            geometry_dir = PROJECT_ROOT / 'outputs' / args.method.replace("-", "").lower() / args.statue_class / args.model_id / 'geometry'
             geometry_dir.mkdir(parents=True, exist_ok=True)
             temporary = geometry_dir / 'metrics.json.tmp'
             temporary.write_text(json.dumps(report, indent=2), encoding='utf-8')

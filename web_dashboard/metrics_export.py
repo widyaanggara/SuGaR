@@ -11,7 +11,7 @@ METRICS = ['PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
            'Precision @2cm (%)', 'Recall @2cm (%)', 'F1 @2cm (%)',
            'Precision @5cm (%)', 'Recall @5cm (%)', 'F1 @5cm (%)',
            'Peak VRAM (GB)', 'Total Waktu (Menit)']
-METHODS = ('3DGS', 'SuGaR', '3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor')
+METHODS = ('2DGS_scaffold_anchor', 'RaDe-GS_scaffold_anchor', '2DGS', 'RaDe-GS', '3DGS', 'SuGaR', '3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor')
 
 
 def number(value):
@@ -53,7 +53,7 @@ def image_counts(root, cls, model, experiment, row):
     base = Path(root) / 'outputs'
     if experiment == 'scaffold_anchor':
         base /= 'ablations/scaffold_anchor'
-    method = row.get('Metode', '').replace('_scaffold_anchor', '').lower()
+    method = row.get('Metode', '').replace('_scaffold_anchor', '').replace('-', '').lower()
     report = read_json(base / method / cls / model / 'evaluation/metrics.json')
     if not isinstance(report, dict):
         return [None, None, None]
@@ -187,7 +187,7 @@ def build_excel(rows, root):
         suffix = '' if experiment == 'baseline' else '_scaffold_anchor'
         values = []
         for cls, mdl in pairs:
-            for method in ('3DGS', 'SuGaR'):
+            for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS'):
                 row = index.get((cls, mdl, method + suffix))
                 if row is None:
                     continue
@@ -201,7 +201,7 @@ def build_excel(rows, root):
              (12, 18, 'Kualitas geometri'), (19, 20, 'Sumber daya')])) )
     delta_rows = []
     for cls, mdl in pairs:
-        for method in ('3DGS', 'SuGaR'):
+        for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS'):
             a, b = index.get((cls, mdl, method)), index.get((cls, mdl, method + '_scaffold_anchor'))
             if not a or not b:
                 continue

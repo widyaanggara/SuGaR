@@ -384,6 +384,8 @@ function renderGrid(data) {
           <div class="pipeline-row"><span><span class="stage-index">04</span>SuGaR + OBJ</span>${chip(info.sugar_obj, 'OBJ lengkap', info.sugar_mesh ? 'Mesh kasar' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>2DGS</span>${chip(info.external_methods?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_methods?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>RaDe-GS</span>${chip(info.external_methods?.radegs?.evaluated, 'Evaluasi tersedia', info.external_methods?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span>Ablasi 3DGS</span>${chip(info.ablations?.['3dgs']?.evaluated, 'Evaluasi tersedia', info.ablations?.['3dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span>Ablasi SuGaR</span>${chip(info.ablations?.sugar?.evaluated, 'Evaluasi tersedia', info.ablations?.sugar?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>Ablasi 2DGS</span>${chip(info.external_ablations?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_ablations?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>Ablasi RaDe-GS</span>${chip(info.external_ablations?.radegs?.evaluated, 'Evaluasi tersedia', info.external_ablations?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual (4 metode)</span>${chip(info.evaluated)}</div>

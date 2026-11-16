@@ -69,6 +69,10 @@ def get_project_status(root=PROJECT_ROOT):
             "3dgs_30k": dgs_done, "sugar_mesh": any((sugar / "mesh").glob("*.ply")),
             "sugar_obj": sugar_done, "evaluated": all_evaluated,
             "external_methods": external_status,
+            "ablations": {key: {'trained': (has_checkpoint(output_base(root, 'scaffold_anchor') / key / cls / mdl, 30000)
+                                            if key == '3dgs' else has_sugar_result(output_base(root, 'scaffold_anchor') / key / cls / mdl)),
+                'evaluated': has_evaluation(output_base(root, 'scaffold_anchor') / key / cls / mdl)}
+                for key in ('3dgs', 'sugar')},
             "external_ablations": {key: {'trained': trained(output_base(root, 'scaffold_anchor') / key / cls / mdl),
                 'evaluated': bool(visual_metrics(output_base(root, 'scaffold_anchor') / key / cls / mdl))}
                 for key in EXTERNAL_METHODS},

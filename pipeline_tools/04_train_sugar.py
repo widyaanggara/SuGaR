@@ -31,7 +31,9 @@ def train_sugar_pipeline(scene_path: str,
                          logger: ThesisLogger = None,
                          image_downscale: int = 1,
                          image_max_size: int = 1600,
-                         resume: bool = True):
+                         resume: bool = True,
+                         quality_options=None,
+                         reuse_coarse=None):
     """
     Menjalankan pipeline SuGaR lengkap secara teratur dan aman dari masalah memori/path.
     
@@ -45,6 +47,7 @@ def train_sugar_pipeline(scene_path: str,
         raise FileNotFoundError("Dataset COLMAP dan checkpoint 3DGS iterasi 7000 harus lengkap.")
     sugar_settings(dict(vertices=n_vertices, refinement_time=refinement_time,
         gaussians_per_triangle=gaussians_per_triangle, regularization=regularization_type))
+    quality_options = dict(quality_options or {})
     if not training_matches(checkpoint_3dgs, scene_path, image_downscale, image_max_size, white_background,
                             use_recorded_initialization=True):
         raise ValueError('Resolusi, split, background, atau model COLMAP berbeda dari baseline 3DGS. Jalankan Pipeline Lengkap untuk konfigurasi ini.')
@@ -106,6 +109,8 @@ def train_sugar_pipeline(scene_path: str,
         'vertices': n_vertices, 'gaussians_per_triangle': gaussians_per_triangle,
         'image_downscale': image_downscale, 'image_max_size': image_max_size,
         'white_background': white_background,
+        'quality_options': quality_options,
+        'reused_coarse': file_signature(Path(reuse_coarse)) if reuse_coarse else None,
         'code': code_identity(PROJECT_ROOT, ['sugar_trainers/coarse_density.py',
             'sugar_trainers/coarse_density_and_dn_consistency.py', 'sugar_trainers/coarse_sdf.py',
             'sugar_trainers/refine.py', 'sugar_scene/sugar_model.py', 'sugar_scene/sugar_optimizer.py',
@@ -144,6 +149,13 @@ def train_sugar_pipeline(scene_path: str,
     })
 
     coarse_sugar_path = journal.get('coarse', {})
+    if coarse_sugar_path is None and reuse_coarse:
+        import shutil
+        copied = coarse_dir / 'reused' / Path(reuse_coarse).name
+        copied.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(reuse_coarse, copied)
+        coarse_sugar_path = str(copied)
+        journal.complete('coarse', {}, coarse_sugar_path)
     coarse_reused = coarse_sugar_path is not None
     if coarse_sugar_path is None:
         if regularization_type == 'sdf':
@@ -184,6 +196,12 @@ def train_sugar_pipeline(scene_path: str,
         'use_marching_cubes': False,
         'use_vanilla_3dgs': False,
     })
+    if quality_options:
+        region = quality_options['region']
+        coarse_mesh_args.update(
+            bboxmin=str(tuple(region['min'])), bboxmax=str(tuple(region['max'])),
+            center_bbox=False, poisson_depth=quality_options['poisson_depth'],
+            save_predecimation=True)
     mesh_inputs = {'coarse': file_signature(Path(coarse_sugar_path))}
     coarse_mesh_path = journal.get('mesh', mesh_inputs)
     if coarse_mesh_path is None:
@@ -287,6 +305,8 @@ def train_sugar_pipeline(scene_path: str,
                     white_background=white_background, scene_path=scene_path)
     manifest.update(image_downscale=image_downscale, image_max_size=image_max_size)
     manifest['mesh_export'] = 'obj' if export_obj else 'surface'
+    if quality_options:
+        manifest['quality_options'] = quality_options
     if logger:
         manifest['stage_timings_seconds'] = dict(logger.data['timings_seconds'])
     manifest['upstream_reference'] = research_presets()['source']

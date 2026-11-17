@@ -23,7 +23,7 @@ def training_background(output):
 
 
 def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_max_size=1600, experiment='baseline',
-                       sugar_stage='refined'):
+                       sugar_stage='refined', output_override=None):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
     os.environ.setdefault('SUGAR_IMAGE_DEVICE', 'cpu')
     os.environ['SUGAR_IMAGE_DOWNSCALE'] = str(image_downscale)
@@ -46,6 +46,10 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
         output_root = output_root / 'ablations' / experiment
     baseline = output_root / '3dgs' / cls / mdl
     output = output_root / ('3dgs' if method == '3DGS' else 'sugar') / cls / mdl
+    if output_override is not None:
+        if method != 'SuGaR':
+            raise ValueError('Output override hanya untuk SuGaR.')
+        output = Path(output_override).resolve()
     iteration = 30000 if method == '3DGS' else 7000
     if not has_checkpoint(baseline, iteration):
         raise FileNotFoundError(f'Checkpoint 3DGS {iteration} belum lengkap.')
@@ -56,9 +60,11 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
         raise ValueError('Konfigurasi evaluasi berbeda dari training baseline: resolusi, split, atau model COLMAP berubah.')
     manifest = None
     if method == 'SuGaR':
-        if not has_sugar_result(output):
+        if not has_sugar_result(output, baseline=baseline):
             raise FileNotFoundError('Hasil pipeline SuGaR belum lengkap; perlu pipeline_result.json.')
         manifest = json.loads((output / 'pipeline_result.json').read_text(encoding='utf-8'))
+        if Path(manifest['scene_path']).resolve() != scene.resolve():
+            raise ValueError('Dataset manifest SuGaR berbeda dari target evaluasi.')
         if manifest['white_background'] != white:
             raise ValueError('Background SuGaR dan baseline berbeda; latih dengan konfigurasi yang sama.')
     wrapper = GaussianSplattingWrapper(source_path=str(scene), output_path=str(baseline),

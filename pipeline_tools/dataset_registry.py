@@ -42,12 +42,13 @@ def file_signature(path):
     return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
 
-def has_sugar_result(output):
+def has_sugar_result(output, baseline=None):
     import json
     output = Path(output)
     try:
         manifest = json.loads((output / "pipeline_result.json").read_text(encoding="utf-8"))
-        baseline = output.parents[2] / '3dgs' / output.parent.name / output.name / 'point_cloud/iteration_7000/point_cloud.ply'
+        baseline = (Path(baseline) if baseline is not None else
+                    output.parents[2] / '3dgs' / output.parent.name / output.name) / 'point_cloud/iteration_7000/point_cloud.ply'
         if 'baseline_signature' in manifest and manifest['baseline_signature'] != file_signature(baseline):
             return False
         keys = ('coarse_mesh', 'refined_checkpoint',

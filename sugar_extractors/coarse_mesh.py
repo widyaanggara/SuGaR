@@ -40,7 +40,7 @@ def extract_mesh_from_coarse_sugar(args):
     # Mesh computation parameters
     fg_bbox_factor = 1.  # 1.
     bg_bbox_factor = 4.  # 4.
-    poisson_depth = 10  # 10 for most real scenes. 6 or 7 work well for most synthetic scenes
+    poisson_depth = getattr(args, 'poisson_depth', 10)
     vertices_density_quantile = 0.1  # 0.1 for most real scenes. 0. works well for most synthetic scenes
     decimate_mesh = True
     clean_mesh = True
@@ -360,7 +360,11 @@ def extract_mesh_from_coarse_sugar(args):
                     bg_mask = ((surface_points[points_idx] - _camera_average_xyz).abs().max(dim=-1)[0]
                                < bg_bbox_factor * _cameras_spatial_extent) * ~fg_mask
                 else:
-                    bg_mask = (surface_points[points_idx].abs().max(dim=-1)[0] < bg_bbox_factor * sugar.get_cameras_spatial_extent()) * ~fg_mask
+                    # Custom foreground bounds are world coordinates. Keep the
+                    # background centered on the cameras, not the world origin.
+                    bg_extent, bg_center = sugar.get_cameras_spatial_extent(return_average_xyz=True)
+                    bg_mask = ((surface_points[points_idx] - bg_center).abs().max(dim=-1)[0]
+                               < bg_bbox_factor * bg_extent) * ~fg_mask
 
                 fg_points = surface_points[points_idx][fg_mask]
                 fg_colors = surface_colors[points_idx][fg_mask]
@@ -432,6 +436,12 @@ def extract_mesh_from_coarse_sugar(args):
                 CONSOLE.print("Finished computing meshes.")
                 CONSOLE.print("Foreground mesh:", o3d_fg_mesh)
                 CONSOLE.print("Background mesh:", o3d_bg_mesh)
+
+                if getattr(args, 'save_predecimation', False) and o3d_fg_mesh is not None:
+                    # Preserve evidence of detail before decimation/projection.
+                    raw_path = os.path.join(mesh_output_dir, f'foreground_level{surface_level}_predecimation.ply')
+                    if not o3d.io.write_triangle_mesh(raw_path, o3d_fg_mesh):
+                        raise RuntimeError(f'Failed to save predecimation mesh: {raw_path}')
                 
                 # ---Decimate and clean meshes---
                 CONSOLE.print("\n-----Decimating and cleaning meshes-----")

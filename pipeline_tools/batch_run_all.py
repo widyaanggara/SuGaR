@@ -30,7 +30,8 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          colmap_sequential_overlap=10, gaussians_per_triangle=1,
                          regularization='dn_consistency', experiment='baseline', scaffold_repo=None,
                          scaffold_python=None, scaffold_iterations=30000, scaffold_resolution=1,
-                         include_external=False, python_2dgs=None, python_radegs=None, external_resolution=-1):
+                         include_external=False, python_2dgs=None, python_radegs=None, external_resolution=-1,
+                         radegs_profile='yaml'):
     scene_dir, root = Path(scene_dir), Path(root)
     if experiment not in ('baseline', 'scaffold_anchor'):
         raise ValueError('Unknown experiment.')
@@ -124,7 +125,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
         for method, python in (('2dgs', python_2dgs), ('radegs', python_radegs)):
             run_stage('run_external_method.py', [*common, '--method', method,
                 '--python', python or sys.executable, '--gpu', gpu, '--resolution', external_resolution,
-                '--experiment', experiment, *initial_args, '--train_only',
+                '--experiment', experiment, *initial_args, '--train_only', '--radegs_profile', radegs_profile,
                 *([] if resume else ['--no_resume'])], root)
     if not skip_evaluation:
         for method, output, retrained in (("3DGS", out_3dgs, trained_3dgs), ("SuGaR", out_sugar, trained_sugar)):
@@ -139,7 +140,8 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
         for method, python in (('2dgs', python_2dgs), ('radegs', python_radegs)):
             args = [*common, '--method', method, '--python', python or sys.executable,
                     '--gpu', gpu, '--resolution', external_resolution, '--experiment', experiment,
-                    *initial_args, '--postprocess_only', *([] if resume else ['--no_resume'])]
+                    *initial_args, '--postprocess_only', '--radegs_profile', radegs_profile,
+                    *([] if resume else ['--no_resume'])]
             run_stage('run_external_method.py', args, root)
     return "COMPLETED"
 
@@ -164,6 +166,7 @@ def main():
     parser.add_argument('--python_2dgs', default=sys.executable)
     parser.add_argument('--python_radegs', default=sys.executable)
     parser.add_argument('--external_resolution', type=int, choices=(-1, 1, 2, 4, 8), default=-1)
+    parser.add_argument('--radegs_profile', choices=('yaml', 'legacy'), default='yaml')
     add_resolution_arguments(parser, colmap=True)
     add_colmap_arguments(parser)
     args = parser.parse_args()
@@ -195,7 +198,7 @@ def main():
                 scaffold_python=args.scaffold_python, scaffold_iterations=args.scaffold_iterations,
                 scaffold_resolution=args.scaffold_resolution, include_external=args.include_external,
                 python_2dgs=args.python_2dgs, python_radegs=args.python_radegs,
-                external_resolution=args.external_resolution)
+                external_resolution=args.external_resolution, radegs_profile=args.radegs_profile)
             results.append({"target": f"{cls}/{mdl}", "status": status})
         except Exception as exc:
             print(f"[ERROR] {cls}/{mdl}: {exc}", flush=True)

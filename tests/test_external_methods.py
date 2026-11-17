@@ -174,6 +174,41 @@ class ExternalMethodTests(unittest.TestCase):
         self.assertEqual((staged / 'sparse/0/points3D.ply').read_text(), 'scaffold anchors')
         self.assertEqual(runner.staged_anchor_scene(scene, output, anchor), staged)
 
+    def test_legacy_checkpoint_compatibility_is_scoped_to_radegs_resume(self):
+        for method, resume in (('radegs', True), ('radegs', False), ('2dgs', True)):
+            with self.subTest(method=method, resume=resume):
+                output = self.root / 'outputs' / method / 'Penabuh/model_01'
+                identity = {'scene': runner.scene_identity(self.root / 'datasets/Penabuh/model_01'),
+                            'resolution': 1, 'experiment': 'baseline', 'initial_sha256': None}
+                self.write(output / 'togoglab_run.json', json.dumps({'identity': identity}))
+                saved = output / 'chkpnt15000.pth'
+                self.write(saved, 'local training state')
+                checkpoint(output).unlink(missing_ok=True)
+                args = argparse.Namespace(statue_class='Penabuh', model_id='model_01', method=method,
+                    train_only=True, gpu=0, python=sys.executable, evaluate_only=False,
+                    no_resume=not resume, resolution=1)
+                process = MagicMock()
+                def complete():
+                    self.write(checkpoint(output))
+                    self.write(output / 'cfg_args')
+                    return 0
+                process.wait.side_effect = complete
+                process.poll.return_value = 0
+                with patch.object(runner, 'ROOT', self.root), patch.object(runner, 'ThesisLogger'), \
+                     patch.dict(runner.os.environ, {}, clear=True), \
+                     patch.object(runner.subprocess, 'run') as preflight, \
+                     patch.object(runner.subprocess, 'Popen', return_value=process) as popen:
+                    runner.run(args)
+                    command = popen.call_args.args[0]
+                    self.assertEqual('--start_checkpoint' in command, resume)
+                    if resume:
+                        self.assertEqual(command[command.index('--start_checkpoint') + 1], str(saved))
+                    child_env = popen.call_args.kwargs['env']
+                    self.assertEqual(child_env.get('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'),
+                                     '1' if method == 'radegs' and resume else None)
+                    self.assertNotIn('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD', preflight.call_args.kwargs['env'])
+                    self.assertNotIn('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD', runner.os.environ)
+
     def test_dashboard_full_pipeline_snapshots_all_environments(self):
         jobs, _ = prepare_jobs(dict(action='full_pipeline', class_name='Penabuh', model_id='model_01',
             python_2dgs='/env/2dgs/python', python_radegs='/env/radegs/python'), self.root)

@@ -1,0 +1,53 @@
+# Training 1920, allocator GC, --eval, metric.py asli; mesh_extract.py (voxel 0.009, depth 8.0).
+project:
+  name: RaDe-GS
+  dataset: Dataset Togog Bali
+dataset:
+  root: /home/pande/projects/RaDe-GS/dataset/togog_bali
+output:
+  root: output/hasil_radegs_v2/togog_bali
+results:
+  csv: research_results/hasil_radegs_v2/experiment_results_togog_bali.csv
+colmap:
+  executable: colmap
+  camera_model: OPENCV
+  use_gpu: true
+training:
+  extra_args:
+    - "--enable_allocator_gc"
+    - "--iterations"
+    - "30000"
+    - "--resolution"
+    - "1920"
+    - "--eval"
+rendering:
+  enabled: true
+  extra_args: []
+image_metrics:
+  enabled: true
+mesh:
+  enabled: true
+  script: mesh_extract.py
+  resolution: 2
+  num_cluster: 8
+  depth_ratio: 0.5
+  voxel_size: 0.009
+  max_depth: 8.0
+  extra_args: []
+resource_monitor:
+  interval_seconds: 5.0
+resource_guard:
+  enabled: true
+  cooldown_before_mesh_seconds: 5
+  minimum_free_ram_gb: 4
+  minimum_free_vram_mb: 1024
+  wait_if_memory_low: true
+  check_interval_seconds: 10
+  max_wait_seconds: 300
+geometry_evaluation:
+  enabled: true
+  gt_root: dataset/ground_truth/togog_bali
+  skip_missing_gt: true
+  sample_points: 100000
+  distance_threshold: null
+  seed: 0

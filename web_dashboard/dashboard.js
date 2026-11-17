@@ -5,6 +5,19 @@ let lastJobId = '';
 let selectedLogId = null;
 let selectedLogRequest = 0;
 let selectedLogLoading = false;
+let heldLogElement = null;
+document.addEventListener('pointerup', () => { heldLogElement = null; });
+document.addEventListener('pointercancel', () => { heldLogElement = null; });
+
+function logSelectionActive(element) {
+  if (heldLogElement === element.id) return true;
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed) return false;
+  for (let i = 0; i < selection.rangeCount; i++) {
+    if (selection.getRangeAt(i).intersectsNode(element)) return true;
+  }
+  return false;
+}
 let lastQueueSignature = null;
 let lastGridSignature = null;
 let cachedMetrics = [];
@@ -796,12 +809,16 @@ async function refreshSelectedJobLogs(force = false) {
     if (selectedLogId !== id || request !== selectedLogRequest) return;
     $('jobLogTitle').textContent = `${modelName(data.job.class_name, data.job.model_id)} · ${data.job.class_name}/${data.job.model_id} · ${data.job.action}`;
     $('jobLogStatus').textContent = `${data.job.status} · diperbarui otomatis setiap 2 detik · 300 baris terakhir`;
-    $('jobLogContent').textContent = data.logs.length ? data.logs.join('\n') : 'Belum ada log untuk pekerjaan ini.';
-    if ($('jobLogFollow').checked) $('jobLogContent').scrollTop = $('jobLogContent').scrollHeight;
+    const content = $('jobLogContent');
+    if (!logSelectionActive(content)) {
+      const text = data.logs.length ? data.logs.join('\n') : 'Belum ada log untuk pekerjaan ini.';
+      if (content.textContent !== text) content.textContent = text;
+      if ($('jobLogFollow').checked) content.scrollTop = content.scrollHeight;
+    }
   } catch (error) {
     if (selectedLogId === id && request === selectedLogRequest) {
       $('jobLogStatus').textContent = 'Gagal memuat log';
-      $('jobLogContent').textContent = error.message;
+      if (!logSelectionActive($('jobLogContent'))) $('jobLogContent').textContent = error.message;
     }
   } finally {
     if (selectedLogId === id && request === selectedLogRequest) selectedLogLoading = false;
@@ -811,6 +828,7 @@ function closeJobLogs() { selectedLogId = null; selectedLogRequest++; selectedLo
 function showLiveLogs() { closeJobLogs(); $('termLabel').textContent = 'output'; pollLogs(); }
 
 function renderLogs(logs) {
+  if (logSelectionActive($('termBody'))) return;
   $('termBody').innerHTML = '';
   for (const line of logs) {
     const div = document.createElement('div');
@@ -821,8 +839,28 @@ function renderLogs(logs) {
   if ($('chkScroll').checked) $('termBody').scrollTop = $('termBody').scrollHeight;
 }
 function clearTerm() { $('termBody').textContent = ''; }
-async function copyLogs() {
-  try { await navigator.clipboard.writeText($('termBody').innerText); showToast('Log disalin.'); }
+async function copyLogs(elementId = 'termBody') {
+  const content = $(elementId);
+  const text = content.innerText ?? content.textContent;
+  try {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API tidak tersedia');
+      await navigator.clipboard.writeText(text);
+    } catch (_) {
+      // Clipboard API may be unavailable when accessing the campus server over HTTP.
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.setAttribute('readonly', '');
+      field.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+      const host = elementId === 'jobLogContent' ? $('jobLogDialog') : document.body;
+      host.appendChild(field);
+      try {
+        field.select();
+        if (!document.execCommand('copy')) throw new Error('Gagal menyalin. Blok teks log lalu tekan Ctrl+C.');
+      } finally { field.remove(); }
+    }
+    showToast('Log yang tampil disalin.');
+  }
   catch (error) { showToast(error.message); }
 }
 

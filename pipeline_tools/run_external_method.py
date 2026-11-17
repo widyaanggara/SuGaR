@@ -86,15 +86,36 @@ def run(args):
     except FileNotFoundError as exc:
         raise ValueError(f'Python metode tidak ditemukan: {args.python}. '
                          'Periksa path environment pada server (bin/python, bukan bin/pytho).') from exc
+    plan = None
+    if args.method == 'radegs' and getattr(args, 'radegs_profile', 'legacy') == 'yaml':
+        config_name = 'tanks_temples.yaml' if args.statue_class == 'TanksAndTemples' else 'togog_bali.yaml'
+        config_path = ROOT / 'pipeline_tools/configs/radegs' / config_name
+        try:
+            result = subprocess.run([args.python, str(ROOT / 'pipeline_tools/radegs_yaml.py'),
+                '--repo', str(repo), '--config', str(config_path), '--scene', str(scene), '--output', str(output)],
+                cwd=repo, env=env, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f'Gagal membaca/validasi {config_path}:\n{exc.stderr}') from exc
+        plan = json.loads(result.stdout)
+        print(f'[YAML] {config_path}; resolusi efektif={plan["resolution"]}; '
+              f'parameter training={plan["config"]["training"]["extra_args"]}. '
+              '--resolution dashboard digantikan oleh YAML untuk RaDe-GS.', flush=True)
     output.mkdir(parents=True, exist_ok=True)
     receipt = output / 'togoglab_run.json'
     identity = {'scene': scene_identity(scene), 'resolution': args.resolution, 'experiment': experiment,
                 'initial_sha256': hashlib.sha256(initial_ply.read_bytes()).hexdigest() if initial_ply else None}
+    if plan:
+        identity['resolution'] = plan['resolution']
+        identity['radegs_yaml'] = {key: plan['config'][key] for key in
+            ('training', 'rendering', 'image_metrics', 'mesh', 'resource_guard')}
     previous_run = json.loads(receipt.read_text()) if receipt.is_file() else {}
     matches = previous_run.get('identity') == identity
     if previous_run and not matches and not args.no_resume and not args.evaluate_only:
         raise ValueError('Konfigurasi/dataset berubah. Nonaktifkan Lewati tahap yang selesai untuk training ulang.')
     postprocess_only = getattr(args, 'postprocess_only', False)
+    if plan and not previous_run and trained(output) and not (args.no_resume or args.evaluate_only or postprocess_only):
+        raise ValueError('Checkpoint lama tidak memiliki identitas YAML. Cadangkan hasil lama lalu '
+                         'nonaktifkan Lewati tahap yang selesai untuk training dengan YAML.')
     checkpoint_matches = trained(output) and previous_run.get('training_checkpoint') == file_signature(checkpoint(output))
     imported_baseline = not previous_run and experiment == 'baseline'
     skip_training = args.evaluate_only or postprocess_only or (not args.no_resume and trained(output) and ((matches and checkpoint_matches) or imported_baseline))
@@ -110,6 +131,13 @@ def run(args):
         atomic_json(receipt, previous_run)
     training_scene = staged_anchor_scene(scene, output, initial_ply) if initial_ply and args.method == 'radegs' else scene
     stages = commands(args.method, args.python, training_scene, output, args.resolution)
+    if plan:
+        atomic_json(output / 'radegs_effective_config.json', plan['config'])
+        names = [('Training', 'training'), ('Rendering', 'rendering'),
+                 ('Evaluasi_Visual', 'image_metrics'), ('Ekstraksi_Mesh', 'mesh_extraction')]
+        stages = [(name, [args.python, '-u', *plan['commands'][key][1:]]) for name, key in names]
+        train_command = stages[0][1]
+        train_command[train_command.index('-s') + 1] = str(training_scene)
     if initial_ply and args.method == '2dgs':
         stages[0][1].extend(['--init_ply', str(initial_ply)])
     if getattr(args, 'train_only', False):
@@ -130,6 +158,7 @@ def run(args):
         # Keep phase logs separate so visual evaluation does not replace training time.
         logger = ThesisLogger(args.statue_class, args.model_id, METHODS[args.method][0] + ('_scaffold_anchor' if experiment == 'scaffold_anchor' else ''))
         try:
+            stage_env = env.copy()
             logger.set_parameters({'phase': stage, 'repository': str(repo), 'python': args.python})
             if stage == 'Training' and not args.no_resume and matches:
                 ignored = previous_run.get('ignored_checkpoints', {})
@@ -137,13 +166,25 @@ def run(args):
                                key=lambda p: int(p.stem[6:]) if p.stem[6:].isdigit() else -1)
                 if saved and saved[-1].stem[6:].isdigit():
                     command.extend(['--start_checkpoint', str(saved[-1])])
+                    if args.method == 'radegs':
+                        # Native RaDe-GS saves full training state, including NumPy
+                        # scalars. PyTorch 2.6's weights-only default cannot load it.
+                        # Limit compatibility to this resume child and a checkpoint
+                        # from this run's matching local output, never global settings.
+                        stage_env['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '1'
+                        print(f'[RESUME] Memuat state training lokal tepercaya: {saved[-1]} '
+                              '(kompatibilitas checkpoint PyTorch 2.6+).', flush=True)
             if stage == 'Evaluasi_Visual':
                 # Native scripts can swallow exceptions; never accept stale metrics as success.
                 result_path = output / 'results.json'
                 previous = result_path.stat().st_mtime_ns if result_path.exists() else None
             logger.start_stage(stage)
+            if plan and stage == 'Ekstraksi_Mesh':
+                subprocess.run([args.python, str(ROOT / 'pipeline_tools/radegs_yaml.py'),
+                    '--repo', str(repo), '--guard', str(output / 'radegs_effective_config.json')],
+                    cwd=repo, env=stage_env, check=True)
             print('[RUN] ' + subprocess.list2cmdline(command), flush=True)
-            process = subprocess.Popen(command, cwd=repo, env=env)
+            process = subprocess.Popen(command, cwd=repo, env=stage_env)
             try:
                 if stage == 'Training':
                     logger.start_vram_monitor(process.pid)
@@ -182,6 +223,8 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--method', choices=METHODS, required=True)
+    parser.add_argument('--radegs_profile', choices=('yaml', 'legacy'), default='yaml',
+                        help='yaml: konfigurasi Togog Bali/Tanks and Temples; legacy: parameter runner lama.')
     parser.add_argument('--statue_class', required=True)
     parser.add_argument('--model_id', required=True)
     parser.add_argument('--python', default=sys.executable)

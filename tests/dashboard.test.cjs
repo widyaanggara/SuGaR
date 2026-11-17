@@ -678,6 +678,70 @@ test('log errors are visible in the dialog instead of leaving an apparently dead
   assert.equal(app.nodes.get('jobLogContent').textContent, 'Log belum ditemukan');
 });
 
+test('selected log text and scroll stay stable during polling, then catch up after selection clears', async () => {
+  const app = page();
+  await vm.runInContext("showJobLogs('test-id')", app.context);
+  const content = app.nodes.get('jobLogContent');
+  content.scrollTop = 23;
+  content.scrollHeight = 900;
+  let selecting = true;
+  app.context.window.getSelection = () => ({isCollapsed: !selecting, rangeCount: 1,
+    getRangeAt: () => ({intersectsNode: node => node === content})});
+  app.setJobLogs({job: {class_name: 'Dewa', model_id: 'model_01', action: 'full_pipeline', status: 'RUNNING'},
+    logs: ['new training output']});
+  await vm.runInContext('pollLogs()', app.context);
+  assert.match(content.textContent, /Matching 1\/10/);
+  assert.equal(content.scrollTop, 23);
+  selecting = false;
+  await vm.runInContext('pollLogs()', app.context);
+  assert.equal(content.textContent, 'new training output');
+  assert.equal(content.scrollTop, 900);
+});
+
+test('dragging and selecting live logs prevents replacement, including error responses in dialog', async () => {
+  const app = page();
+  const terminal = app.nodes.get('termBody');
+  terminal.id = 'termBody';
+  vm.runInContext("renderLogs(['original']); heldLogElement = 'termBody'; renderLogs(['new']);", app.context);
+  assert.equal(terminal.children[0].textContent, 'original');
+  vm.runInContext("heldLogElement = null; renderLogs(['new']);", app.context);
+  assert.equal(terminal.children[0].textContent, 'new');
+  await vm.runInContext("showJobLogs('test-id')", app.context);
+  const content = app.nodes.get('jobLogContent');
+  app.context.window.getSelection = () => ({isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => ({intersectsNode: node => node === content || node === terminal})});
+  vm.runInContext("renderLogs(['newer']);", app.context);
+  assert.equal(terminal.children[0].textContent, 'new');
+  app.failLogs();
+  await vm.runInContext('refreshSelectedJobLogs()', app.context);
+  assert.match(content.textContent, /Matching 1\/10/);
+});
+
+test('copy button copies the displayed dialog log without waiting for another poll', async () => {
+  const app = page();
+  await vm.runInContext("showJobLogs('test-id')", app.context);
+  let copied;
+  app.context.navigator.clipboard.writeText = async text => {copied = text;};
+  await vm.runInContext("copyLogs('jobLogContent')", app.context);
+  assert.equal(copied, '[COLMAP] Matching 1/10');
+  assert.match(fs.readFileSync('web_dashboard/index.html', 'utf8'), /onclick="copyLogs\('jobLogContent'\)"/);
+});
+
+test('copy falls back inside the modal when clipboard API is unavailable over HTTP', async () => {
+  const app = page();
+  app.nodes.get('jobLogContent').textContent = 'training log';
+  app.context.navigator.clipboard = undefined;
+  let selected = false, removed = false;
+  const field = {style: {}, setAttribute() {}, select() {selected = true;}, remove() {removed = true;}};
+  app.context.document.createElement = () => field;
+  app.context.document.execCommand = command => {assert.equal(command, 'copy'); return true;};
+  await vm.runInContext("copyLogs('jobLogContent')", app.context);
+  assert.equal(field.value, 'training log');
+  assert.equal(app.nodes.get('jobLogDialog').children.at(-1), field);
+  assert.equal(selected, true);
+  assert.equal(removed, true);
+});
+
 test('polling keeps the actual Log button stable so clicks are not lost while a job runs', async () => {
   const app = page();
   app.setQueue({is_running: true, status: 'RUNNING', jobs: [{id: 'live', class_name: 'Punakawan',

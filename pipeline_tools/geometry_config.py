@@ -163,7 +163,7 @@ def geometry_model_path(root, cls, mdl, method):
     if method == '3DGS':
         return output / 'point_cloud/iteration_30000/point_cloud.ply'
     manifest = json.loads((output / 'pipeline_result.json').read_text(encoding='utf-8'))
-    mesh = manifest['textured_mesh']
+    mesh = manifest.get('surface_mesh') or manifest['textured_mesh']
     if not isinstance(mesh, str):
         raise ValueError('Path mesh SuGaR tidak valid.')
     model = (output / mesh).resolve()

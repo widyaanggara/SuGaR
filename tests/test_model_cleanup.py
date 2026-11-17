@@ -57,7 +57,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_invalid_target_confirmation_and_active_worker_leave_data_untouched(self):
         photo = self.write('datasets/Dewa/model_01/input/a.jpg')
-        for changes in ({'class_name': ''}, {'model_id': '../model_01'}, {'confirmation': ''}):
+        for changes in ({'class_name': ''}, {'model_id': '../model_01'}, {'confirmation': ''}, {'scope': 'invalid'}):
             with self.assertRaises(ValueError):
                 delete_model_data(self.queue, {**self.data, **changes})
             self.assertTrue(photo.exists())
@@ -65,6 +65,37 @@ class CleanupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             delete_model_data(self.queue, self.data)
         self.assertTrue(photo.exists())
+
+    def test_method_cleanup_preserves_dataset_other_methods_and_settings(self):
+        for scope, label in (('sugar', 'SuGaR'), ('2dgs', '2DGS'), ('radegs', 'RaDe-GS')):
+            with self.subTest(scope=scope):
+                preserved = [self.write('datasets/Dewa/model_01/input/a.jpg'),
+                             self.write('datasets/Dewa/model_01/sparse/0/cameras.bin')]
+                for name in ('model_names', 'geometry_scales', 'geometry_settings'):
+                    preserved.append(self.write(f'datasets/{name}.json', '{"Dewa":{"model_01":"keep"}}'))
+                removed = []
+                for method in ('3dgs', 'sugar', '2dgs', 'radegs', 'scaffold'):
+                    for base in ('outputs', 'outputs/ablations/scaffold_anchor'):
+                        path = self.write(f'{base}/{method}/Dewa/model_01/result.ply')
+                        (removed if method == scope else preserved).append(path)
+                    log_label = {'sugar': 'SuGaR', '2dgs': '2DGS', 'radegs': 'RaDe-GS'}.get(method, method)
+                    path = self.write(f'outputs/logs/training_logs/Dewa_model_01_{log_label}_run.json')
+                    (removed if method == scope else preserved).append(path)
+                removed.append(self.write(f'outputs/logs/training_logs/Dewa_model_01_{label}_scaffold_anchor_run.json'))
+                preserved.append(self.write(f'outputs/{scope}/Dewa/model_02/result.ply'))
+                labels = ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS', label + '_scaffold_anchor']
+                report = self.write('outputs/logs/evaluation_reports/summary_comparison.csv',
+                    'Kelas,Model ID,Metode\n' + ''.join(f'Dewa,model_01,{value}\n' for value in labels))
+                self.queue.jobs = []
+                ids, _ = self.queue.enqueue([dict(action=action, class_name='Dewa', model_id='model_01')
+                                             for action in (scope, 'full_pipeline', '3dgs')])
+                delete_model_data(self.queue, {**self.data, 'scope': scope})
+                self.assertTrue(all(not path.exists() for path in removed))
+                self.assertTrue(all(path.exists() for path in preserved))
+                self.assertEqual([job['id'] for job in self.queue.jobs], [ids[2]])
+                with report.open() as stream:
+                    methods = [row['Metode'] for row in csv.DictReader(stream)]
+                self.assertEqual(methods, [value for value in labels if value not in (label, label + '_scaffold_anchor')])
 
     def test_outside_path_is_rejected_before_deletion(self):
         from unittest.mock import patch

@@ -256,7 +256,7 @@ class ThesisLogger:
                     raise ValueError(f'{key} harus finite dalam rentang 0–100%.')
                 self.data['metrics'][key] = round(value, 4)
 
-    def finalize(self, success: bool = True):
+    def finalize(self, success: bool = True, export_summary: bool = True):
         """Menyelesaikan sesi log dan mengekspor rekapitulasi ke JSON, CSV, dan Markdown."""
         self.data["status"] = "COMPLETED" if success else "FAILED"
         self.stop_vram_monitor()
@@ -278,6 +278,9 @@ class ThesisLogger:
         # 1. Simpan JSON terstruktur
         with open(self.json_file, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=2)
+
+        if not export_summary:
+            return
 
         # 2. Update CSV Rekapitulasi Master
         self._append_to_csv()

@@ -222,6 +222,8 @@
             <label for="meshTriangles">Parameter mesh<input id="meshTriangles" type="number" min="1000" max="2000000" step="1000" value="1000000"><small>Budget decimation; bukan jaminan jumlah vertex akhir.</small></label>
             <label for="gaussiansPerTriangle">Gaussian per segitiga<select id="gaussiansPerTriangle"><option value="1">1 · high_poly</option><option value="3">3 · kustom</option><option value="4">4 · kustom</option><option value="6">6 · low_poly</option></select><small>Memengaruhi kapasitas representasi dan pemakaian VRAM.</small></label>
             <label for="regularization">Regularisasi<select id="regularization"><option value="dn_consistency">dn_consistency · rekomendasi repo</option><option value="density">density · paper, object-centered</option><option value="sdf">sdf · paper, latar kompleks</option></select><small>Catat pilihan yang digunakan dalam protokol eksperimen.</small></label>
+            <label for="sugarMeshExport">Ekspor mesh SuGaR<select id="sugarMeshExport"><option value="surface" selected>Geometri PLY · tanpa baking tekstur</option><option value="obj">OBJ dengan tekstur</option></select><small>PLY menghindari biaya baking tekstur. Evaluasi visual tetap memakai Gaussian refined; PLY geometri tidak memuat tekstur OBJ.</small></label>
+            <label for="sugarDiagnostics">Diagnostik blur SuGaR<select id="sugarDiagnostics"><option value="off" selected>Nonaktif</option><option value="coarse">Render coarse dan refined</option></select><small>Pada Pipeline Lengkap, menambah evaluasi coarse terpisah untuk melacak hilangnya detail. Menambah waktu evaluasi.</small></label>
           </div></div>
           <label class="checkbox-label"><input id="resumeCompleted" type="checkbox" checked><span><strong>Lewati tahap yang selesai dan konfigurasinya sesuai</strong><small>Checkpoint training yang cocok dapat dipulihkan. Nonaktifkan untuk training baru. Jika foto input diganti, siapkan ulang hasil COLMAP agar fitur foto lama tidak digunakan.</small></span></label>
           <div class="method-note"><strong>Satu pekerjaan pada satu waktu.</strong> Antrean mengerjakan model secara berurutan; pemakaian VRAM satu model tetap bergantung pada data dan konfigurasi.</div>
@@ -304,11 +306,38 @@
     <div class="queue-dialog-footer"><span><span class="status-dot"></span> Berjalan bergantian<small>Satu pekerjaan aktif pada satu waktu.</small></span><div class="table-actions"><button id="queueDialogCancel" type="button" class="btn btn-ghost" onclick="closeQueueDialog()">Batal</button><button id="queueDialogSubmit" type="submit" class="btn btn-primary">Tambahkan ke antrean</button></div></div>
   </form>
 </dialog>
+<dialog id="objectRegionDialog" class="model-name-dialog" aria-labelledby="objectRegionHeading" oncancel="if (regionSaving) event.preventDefault(); else closeObjectRegion();">
+  <form onsubmit="event.preventDefault(); saveObjectRegion();">
+    <h2 id="objectRegionHeading">Batas mesh patung</h2>
+    <p id="objectRegionTarget" class="model-name-target"></p>
+    <p class="model-name-help">Isi koordinat dari mesh asli dalam sistem COLMAP, bukan koordinat LiDAR yang sudah diselaraskan. Berlaku untuk SuGaR, 2DGS dan RaDe-GS pada pekerjaan berikutnya. Mesh objek disimpan terpisah; render seluruh foto tetap dievaluasi.</p>
+    <div class="field-grid">
+      <label>X minimum<input id="regionminX" type="number" step="any" required></label>
+      <label>X maksimum<input id="regionmaxX" type="number" step="any" required></label>
+      <label>Y minimum<input id="regionminY" type="number" step="any" required></label>
+      <label>Y maksimum<input id="regionmaxY" type="number" step="any" required></label>
+      <label>Z minimum<input id="regionminZ" type="number" step="any" required></label>
+      <label>Z maksimum<input id="regionmaxZ" type="number" step="any" required></label>
+      <label>Minimum segitiga per fragmen<input id="regionMinTriangles" type="number" min="0" step="1" value="50" required></label>
+    </div>
+    <p class="model-name-help">Periksa batas agar mahkota, tangan dan alas tidak terpotong. Jika belum diatur, pipeline tetap berjalan dengan mesh scene. Simpan ulang batas jika COLMAP dihitung ulang karena koordinat bisa berubah.</p>
+    <p id="objectRegionError" class="model-name-error" role="status"></p>
+    <div class="model-name-actions"><button id="regionClear" type="button" class="btn btn-ghost" onclick="saveObjectRegion(true)">Hapus batas</button><button id="regionCancel" type="button" class="btn btn-ghost" onclick="closeObjectRegion()">Batal</button><button id="regionSave" type="submit" class="btn btn-primary">Simpan batas</button></div>
+  </form>
+</dialog>
 <dialog id="deleteModelDialog" class="model-name-dialog" aria-labelledby="deleteModelHeading" oncancel="if (modelDeleting) event.preventDefault(); else closeDeleteModel();">
   <form onsubmit="event.preventDefault(); deleteModel();">
-    <h2 id="deleteModelHeading">Yakin menghapus data patung ini?</h2>
+    <h2 id="deleteModelHeading">Hapus data patung</h2>
     <p id="deleteModelTarget" class="model-name-target"></p>
-    <p class="model-name-help">Penghapusan permanen mencakup foto/video input, COLMAP, LiDAR, hasil 3DGS, SuGaR, 2DGS, RaDe-GS, Scaffold-GS dan ablasinya, evaluasi, log, antrean, nama, serta pengaturan LiDAR patung ini. Slot patung akan kembali kosong dan bisa diisi ulang. Data patung lain tetap tersimpan.</p>
+    <label for="deleteModelScope">Data yang dihapus</label>
+    <select id="deleteModelScope" class="form-select" required onchange="updateDeleteModelScope()">
+      <option value="" disabled selected>Pilih jenis penghapusan</option>
+      <option value="all">Hapus keseluruhan</option>
+      <option value="sugar">Hapus hasil SuGaR</option>
+      <option value="2dgs">Hapus hasil 2DGS</option>
+      <option value="radegs">Hapus hasil RaDe-GS</option>
+    </select>
+    <p id="deleteModelDescription" class="model-name-help"></p>
     <p class="model-name-help">Hentikan pipeline sebelum menghapus. Tindakan ini tidak dapat dibatalkan.</p>
     <p id="deleteModelError" class="model-name-error" role="status" aria-live="polite"></p>
     <div class="model-name-actions"><button id="deleteModelCancel" type="button" class="btn btn-ghost" onclick="closeDeleteModel()">Batal</button><button id="deleteModelSubmit" type="submit" class="btn btn-danger">Ya, hapus data</button></div>

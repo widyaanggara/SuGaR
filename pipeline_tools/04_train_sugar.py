@@ -144,6 +144,7 @@ def train_sugar_pipeline(scene_path: str,
     })
 
     coarse_sugar_path = journal.get('coarse', {})
+    coarse_reused = coarse_sugar_path is not None
     if coarse_sugar_path is None:
         if regularization_type == 'sdf':
             coarse_sugar_path = coarse_training_with_sdf_regularization(coarse_args)
@@ -219,6 +220,9 @@ def train_sugar_pipeline(scene_path: str,
     })
     refine_inputs = {'mesh': file_signature(Path(coarse_mesh_path))}
     refined_sugar_path = journal.get('refine', refine_inputs)
+    refine_reused = refined_sugar_path is not None
+    if logger:
+        logger.set_parameters({'training_reused': coarse_reused and refine_reused})
     if refined_sugar_path is None:
         refined_sugar_path = refined_training(refined_args)
         journal.complete('refine', refine_inputs, refined_sugar_path)
@@ -260,8 +264,19 @@ def train_sugar_pipeline(scene_path: str,
             logger.end_stage("SuGaR_04_Textured_Mesh_Export")
             logger.log(f"Textured OBJ Mesh tersimpan di: {textured_dir}")
 
+    surface_mesh_path = None
+    if not export_obj:
+        from pipeline_tools.sugar_surface import export_refined_surface
+        if logger:
+            logger.start_stage('SuGaR_04_Surface_Export')
+        surface_mesh_path = export_refined_surface(refined_sugar_path, output_dir / 'surface/refined_surface.ply')
+        if logger:
+            logger.end_stage('SuGaR_04_Surface_Export')
+            logger.log('Ekspor geometri tanpa baking tekstur; evaluasi tetap merender Gaussian refined.')
+
     artifacts = {'coarse_checkpoint': coarse_sugar_path, 'coarse_mesh': coarse_mesh_path,
-                 'refined_checkpoint': refined_sugar_path, 'textured_mesh': refined_mesh_path}
+                 'refined_checkpoint': refined_sugar_path, 'textured_mesh': refined_mesh_path,
+                 'surface_mesh': surface_mesh_path}
     for key, path in artifacts.items():
         if path is not None and not Path(path).is_file():
             raise FileNotFoundError(f"Hasil {key} tidak ditemukan: {path}")
@@ -271,6 +286,9 @@ def train_sugar_pipeline(scene_path: str,
                     decimation_target=n_vertices, gaussians_per_triangle=gaussians_per_triangle,
                     white_background=white_background, scene_path=scene_path)
     manifest.update(image_downscale=image_downscale, image_max_size=image_max_size)
+    manifest['mesh_export'] = 'obj' if export_obj else 'surface'
+    if logger:
+        manifest['stage_timings_seconds'] = dict(logger.data['timings_seconds'])
     manifest['upstream_reference'] = research_presets()['source']
     manifest['baseline_signature'] = file_signature(Path(checkpoint_3dgs) / 'point_cloud/iteration_7000/point_cloud.ply')
     temporary = manifest_path.with_suffix('.tmp')
@@ -294,6 +312,9 @@ def main():
     parser.add_argument("--refinement_time", type=str, default="short", choices=["short", "medium", "long"], help="Waktu refinement (default: short / 2000 iterasi agar cepat dan aman VRAM).")
     parser.add_argument("--vertices", type=int, default=250000, help="Parameter n_vertices_in_mesh upstream, diteruskan sebagai decimation_target ke extractor.")
     parser.add_argument('--gaussians_per_triangle', type=int, choices=(1, 3, 4, 6), default=1)
+    parser.add_argument('--mesh_export', choices=('obj', 'surface'), default='obj',
+                        help='surface mengekspor geometri refined tanpa baking tekstur OBJ.')
+    parser.add_argument('--object_region_json')
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU device (default: 0).")
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
     add_resolution_arguments(parser)
@@ -339,10 +360,15 @@ def main():
                 white_background=args.white_background,
                 logger=logger,
                 image_downscale=args.image_downscale,
-                image_max_size=args.image_max_size
+                image_max_size=args.image_max_size,
+                export_obj=args.mesh_export == 'obj'
             )
+            from pipeline_tools.object_region import resolve_region
+            from pipeline_tools.object_mesh import export_optional
+            region = resolve_region(args.scene_path, args.object_region_json)
+            export_optional(PROJECT_ROOT, args.statue_class, args.model_id, 'sugar', args.experiment, region, output_dir)
         logger.stop_vram_monitor()
-        logger.finalize(success=True)
+        logger.finalize(success=True, export_summary=not logger.data['parameters'].get('training_reused', False))
     except Exception as e:
         logger.log(f"Error pada pipeline SuGaR: {str(e)}", level="error")
         logger.stop_vram_monitor()

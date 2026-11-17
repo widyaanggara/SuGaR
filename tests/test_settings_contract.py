@@ -159,12 +159,24 @@ class SettingsContractTests(unittest.TestCase):
                 self.assertEqual(os.environ['SUGAR_IMAGE_DOWNSCALE'], '4')
                 self.assertEqual(os.environ['SUGAR_IMAGE_MAX_SIZE'], '1280')
                 self.assertEqual(os.environ['CUDA_VISIBLE_DEVICES'], '2')
+                surface = output / 'surface/refined_surface.ply'
+                write(surface)
+                with patch('pipeline_tools.sugar_surface.export_refined_surface', return_value=str(surface)) as export_surface:
+                    module.train_sugar_pipeline(temporary, str(baseline), str(output),
+                        regularization_type='density', refinement_time='medium', n_vertices=200000,
+                        gaussians_per_triangle=6, gpu=2, image_downscale=4, image_max_size=1280,
+                        export_obj=False)
+                export_surface.assert_called_once_with(str(artifacts[2]), output / 'surface/refined_surface.ply')
+                self.assertEqual(textured.call_count, 1, 'Geometry-only export must skip UV texture baking')
+                self.assertEqual(refined.call_count, 2, 'Export changes must reuse matching refinement')
             self.assertEqual(mesh.call_args.args[0].decimation_target, 200000)
             self.assertEqual(refined.call_args.args[0].gaussians_per_triangle, 6)
             self.assertEqual(refined.call_args.args[0].refinement_iterations, 7000)
             self.assertEqual(textured.call_args.args[0].n_gaussians_per_surface_triangle, 6)
             self.assertTrue(coarse.call_args.args[0].eval)
             report = json.loads((output / 'pipeline_result.json').read_text())
+            self.assertIsNone(report['textured_mesh'])
+            self.assertEqual(report['surface_mesh'], 'surface/refined_surface.ply')
             self.assertEqual(report['gaussians_per_triangle'], 6)
             self.assertEqual(report['regularization'], 'density')
             self.assertEqual(report['image_max_size'], 1280)

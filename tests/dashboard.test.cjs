@@ -26,6 +26,8 @@ function page(localPreview = false) {
   nodes.get('refinementTime').value = 'short';
   nodes.get('gaussiansPerTriangle').value = '1';
   nodes.get('regularization').value = 'dn_consistency';
+  nodes.get('sugarMeshExport').value = 'surface';
+  nodes.get('sugarDiagnostics').value = 'off';
   nodes.get('evaluationMethod').value = 'SuGaR';
   nodes.get('colmapMaxImageSize').value = '3200';
   nodes.get('imageDownscale').value = '2';
@@ -86,6 +88,11 @@ function page(localPreview = false) {
         Object.assign(status[body.class_name][body.model_id], result);
         return {ok: true, json: async () => result};
       }
+      if (url === '/api/object-region') {
+        const body = JSON.parse(options.body);
+        status[body.class_name][body.model_id].object_region = body.region;
+        return {ok: true, json: async () => ({object_region: body.region})};
+      }
       const body = url === '/api/colmap' ? {available: true, cuda: false, message: 'Mode otomatis memakai CPU.'} :
         url === '/api/presets' ? JSON.parse(fs.readFileSync('web_dashboard/research_presets.json', 'utf8')) :
         url === '/api/catalog' ? catalog : url === '/api/status' ? status : url === '/api/metrics' ? metrics :
@@ -106,9 +113,26 @@ test('delete model opens confirmation without deleting and targets only the sele
   assert.equal(app.calls.filter(([url]) => url === '/api/model/delete').length, 0);
   assert.equal(app.nodes.get('deleteModelCancel').focused, true);
   await vm.runInContext('deleteModel()', app.context);
+  assert.equal(app.calls.filter(([url]) => url === '/api/model/delete').length, 0);
+  app.nodes.get('deleteModelScope').value = 'all';
+  vm.runInContext('updateDeleteModelScope()', app.context);
+  await vm.runInContext('deleteModel()', app.context);
   const calls = app.calls.filter(([url]) => url === '/api/model/delete');
-  assert.deepEqual(calls[0][1], {class_name: 'Dewa', model_id: 'model_01', confirmation: 'Dewa/model_01'});
+  assert.deepEqual(calls[0][1], {class_name: 'Dewa', model_id: 'model_01', confirmation: 'Dewa/model_01', scope: 'all'});
   assert.equal(app.nodes.get('deleteModelDialog').open, false);
+});
+
+test('method deletion sends the chosen scope and explains preserved inputs', async () => {
+  for (const scope of ['sugar', '2dgs', 'radegs']) {
+    const app = page();
+    await app.events.DOMContentLoaded();
+    vm.runInContext("openDeleteModel('Dewa', 'model_01')", app.context);
+    app.nodes.get('deleteModelScope').value = scope;
+    vm.runInContext('updateDeleteModelScope()', app.context);
+    assert.match(app.nodes.get('deleteModelDescription').textContent, /Foto, COLMAP, LiDAR/);
+    await vm.runInContext('deleteModel()', app.context);
+    assert.equal(app.calls.find(([url]) => url === '/api/model/delete')[1].scope, scope);
+  }
 });
 
 test('2DGS and RaDe-GS queue with their Python environment and appear in results', async () => {
@@ -131,6 +155,39 @@ test('2DGS and RaDe-GS queue with their Python environment and appear in results
   await vm.runInContext('refreshMetrics()', app.context);
   assert.match(app.nodes.get('metricsBody').innerHTML, /2DGS/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /RaDe-GS/);
+});
+
+test('object bounds are validated, saved per model, restored and cleared without enqueueing training', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  vm.runInContext("openObjectRegion('Dewa', 'model_01')", app.context);
+  assert.equal(app.nodes.get('objectRegionDialog').open, true);
+  await vm.runInContext('saveObjectRegion()', app.context);
+  assert.match(app.nodes.get('objectRegionError').textContent, /koordinat/);
+  assert.equal(app.calls.filter(([url]) => url === '/api/object-region').length, 0);
+  for (const [id, value] of Object.entries({regionminX: -1, regionminY: -2, regionminZ: -3,
+    regionmaxX: 1, regionmaxY: 2, regionmaxZ: 3, regionMinTriangles: 50})) app.nodes.get(id).value = String(value);
+  await vm.runInContext('saveObjectRegion()', app.context);
+  assert.deepEqual(app.calls.find(([url]) => url === '/api/object-region')[1], {
+    class_name: 'Dewa', model_id: 'model_01', region: {min: [-1, -2, -3], max: [1, 2, 3], min_triangles: 50}});
+  vm.runInContext("openObjectRegion('Dewa', 'model_01')", app.context);
+  assert.equal(app.nodes.get('regionmaxY').value, 2);
+  await vm.runInContext('saveObjectRegion(true)', app.context);
+  assert.equal(app.calls.filter(([url]) => url === '/api/object-region').at(-1)[1].region, null);
+  assert.equal(app.calls.filter(([url]) => url === '/api/run').length, 0);
+});
+
+test('experimental SuGaR profile and export controls are included in Train All settings', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  vm.runInContext("applyPreset('experimental_capacity_medium')", app.context);
+  app.nodes.get('sugarDiagnostics').value = 'coarse';
+  const settings = vm.runInContext('readExperimentSettings()', app.context);
+  assert.equal(settings.gaussians_per_triangle, 3);
+  assert.equal(settings.refinement_time, 'medium');
+  assert.equal(settings.sugar_mesh_export, 'surface');
+  assert.equal(settings.sugar_diagnostics, true);
+  assert.match(app.nodes.get('presetDescription').textContent, /belum dibuktikan/);
 });
 
 test('full pipeline queues four methods per statue for baseline and Scaffold ablation', async () => {

@@ -27,12 +27,63 @@ let editingModel = null;
 let modelNameSaving = false;
 let deletingModel = null;
 let modelDeleting = false;
+let editingRegion = null;
+let regionSaving = false;
+
+function openObjectRegion(cls, mdl) {
+  if (isFilePreview || regionSaving) return;
+  editingRegion = {class_name: cls, model_id: mdl};
+  $('objectRegionTarget').textContent = `${modelName(cls, mdl)} · ${cls}/${mdl}`;
+  const region = cachedStatus[cls]?.[mdl]?.object_region;
+  for (const key of ['min', 'max']) for (const [index, axis] of ['X', 'Y', 'Z'].entries()) {
+    $(`region${key}${axis}`).value = region?.[key]?.[index] ?? '';
+  }
+  $('regionMinTriangles').value = region?.min_triangles ?? 50;
+  $('objectRegionError').textContent = '';
+  $('objectRegionDialog').showModal();
+}
+
+function closeObjectRegion() {
+  if (regionSaving) return;
+  $('objectRegionDialog').close();
+  editingRegion = null;
+}
+
+async function saveObjectRegion(clear = false) {
+  if (!editingRegion || regionSaving) return;
+  try {
+    let region = null;
+    if (!clear) {
+      region = {min: [], max: [], min_triangles: Number($('regionMinTriangles').value)};
+      for (const key of ['min', 'max']) for (const axis of ['X', 'Y', 'Z']) {
+        const raw = String($(`region${key}${axis}`).value).trim();
+        if (!raw || !Number.isFinite(Number(raw))) throw new Error('Isi keenam koordinat batas patung.');
+        region[key].push(Number(raw));
+      }
+      if (region.min.some((value, i) => value >= region.max[i])) throw new Error('Minimum harus lebih kecil dari maksimum pada setiap sumbu.');
+      if (!Number.isInteger(region.min_triangles) || region.min_triangles < 0) throw new Error('Ambang fragmen harus bilangan bulat >= 0.');
+    }
+    regionSaving = true;
+    for (const id of ['regionSave', 'regionClear', 'regionCancel']) $(id).disabled = true;
+    await api('/api/object-region', {...editingRegion, region});
+    $('objectRegionDialog').close();
+    editingRegion = null;
+    showToast(clear ? 'Batas patung dihapus untuk pekerjaan berikutnya.' : 'Batas patung disimpan untuk Train All berikutnya.');
+    await refreshAll();
+  } catch (error) { $('objectRegionError').textContent = error.message; }
+  finally {
+    regionSaving = false;
+    for (const id of ['regionSave', 'regionClear', 'regionCancel']) $(id).disabled = false;
+  }
+}
 
 function openDeleteModel(cls, mdl) {
   if (isFilePreview || modelDeleting || !cachedStatus[cls]?.[mdl]) return;
   deletingModel = {class_name: cls, model_id: mdl};
   $('deleteModelTarget').textContent = `${modelName(cls, mdl)} — ${cls}/${mdl}`;
   $('deleteModelError').textContent = '';
+  $('deleteModelScope').value = '';
+  updateDeleteModelScope();
   $('deleteModelDialog').showModal();
   $('deleteModelCancel').focus();
 }
@@ -43,15 +94,30 @@ function closeDeleteModel() {
   deletingModel = null;
 }
 
+function updateDeleteModelScope() {
+  const scope = $('deleteModelScope').value;
+  const labels = {sugar: 'SuGaR', '2dgs': '2DGS', radegs: 'RaDe-GS'};
+  $('deleteModelDescription').textContent = scope === 'all'
+    ? 'Menghapus seluruh foto/video input, COLMAP, LiDAR, hasil semua metode dan ablasi, evaluasi, log, antrean, nama serta pengaturan patung ini. Slot kembali kosong.'
+    : labels[scope] ? `Menghapus hasil ${labels[scope]} baseline dan ablasi, beserta evaluasi, log dan pekerjaan metode tersebut. Antrean pipeline lengkap yang menunggu untuk patung ini juga dibatalkan. Foto, COLMAP, LiDAR, nama dan hasil metode lain tetap tersimpan.`
+    : 'Pilih salah satu dari empat jenis penghapusan di atas.';
+  $('deleteModelSubmit').disabled = modelDeleting || !scope;
+}
+
 async function deleteModel() {
   if (!deletingModel || modelDeleting) return;
+  const scope = $('deleteModelScope').value;
+  if (!['all', 'sugar', '2dgs', 'radegs'].includes(scope)) {
+    $('deleteModelError').textContent = 'Pilih jenis penghapusan terlebih dahulu.';
+    return;
+  }
   const target = deletingModel;
   const confirmation = `${target.class_name}/${target.model_id}`;
   modelDeleting = true;
-  for (const id of ['deleteModelSubmit', 'deleteModelCancel']) $(id).disabled = true;
+  for (const id of ['deleteModelSubmit', 'deleteModelCancel', 'deleteModelScope']) $(id).disabled = true;
   $('deleteModelError').textContent = 'Menghapus data, tunggu hingga selesai...';
   try {
-    const result = await api('/api/model/delete', {...target, confirmation});
+    const result = await api('/api/model/delete', {...target, confirmation, scope});
     geometryInputs.clear();
     selectedLogId = null;
     selectedLogRequest++;
@@ -63,7 +129,7 @@ async function deleteModel() {
     $('deleteModelError').textContent = error.message;
   } finally {
     modelDeleting = false;
-    for (const id of ['deleteModelSubmit', 'deleteModelCancel']) $(id).disabled = false;
+    for (const id of ['deleteModelSubmit', 'deleteModelCancel', 'deleteModelScope']) $(id).disabled = false;
   }
 }
 let queueSelection = null;
@@ -193,7 +259,7 @@ async function api(path, data) {
 const settingControls = ['gpuId', 'refinementTime', 'meshTriangles', 'resumeCompleted',
   'colmapMaxImageSize', 'imageDownscale', 'imageMaxSize', 'colmapDevice', 'colmapMatcher',
   'colmapMaxFeatures', 'colmapSequentialOverlap', 'sourceWidth', 'sourceHeight',
-  'gaussiansPerTriangle', 'regularization', 'evaluationMethod'];
+  'gaussiansPerTriangle', 'regularization', 'evaluationMethod', 'sugarMeshExport', 'sugarDiagnostics'];
 let presets = {};
 const sugarControlIds = {vertices: 'meshTriangles', gaussians_per_triangle: 'gaussiansPerTriangle',
   refinement_time: 'refinementTime', regularization: 'regularization'};
@@ -204,6 +270,8 @@ function readExperimentSettings() {
     vertices: Number($('meshTriangles').value), resume: $('resumeCompleted').checked,
     gaussians_per_triangle: Number($('gaussiansPerTriangle').value),
     regularization: $('regularization').value,
+    sugar_mesh_export: $('sugarMeshExport').value || 'obj',
+    sugar_diagnostics: $('sugarDiagnostics').value === 'coarse',
     colmap_max_image_size: Number($('colmapMaxImageSize').value),
     image_downscale: Number($('imageDownscale').value),
     image_max_size: Number($('imageMaxSize').value),
@@ -388,13 +456,17 @@ function renderGrid(data) {
     for (const [mdl, info] of Object.entries(models)) {
       const target = `'${cls}','${mdl}'`;
       const modelLabel = info.display_name || defaultModelName(mdl);
+      const objectLinks = Object.entries({sugar: 'SuGaR', '2dgs': '2DGS', radegs: 'RaDe-GS'}).map(([key, label]) =>
+        info.object_meshes?.[key] === 'ready'
+          ? `<a class="btn-name" href="/static/outputs/${key}/${cls}/${mdl}/object_mesh/object.ply" download>Mesh ${label}</a>`
+          : ['error', 'stale'].includes(info.object_meshes?.[key]) ? `<span class="model-reference">Mesh ${label}: periksa batas/log</span>` : '').join('');
       cells += `<div class="model-cell">
         <div class="model-label"><div class="model-identity"><span class="model-title">${esc(modelLabel)}</span><span class="model-code">${esc(mdl)}</span></div><div class="model-tools">${info.has_video ? chip(true, 'Video') : ''}<button type="button" class="btn-name" aria-label="Ubah nama ${esc(cls)} ${esc(mdl)}" onclick="editModelName(${target})">Ubah nama</button><button type="button" class="btn-name btn-delete-model" aria-label="Hapus data ${esc(cls)} ${esc(mdl)}" title="Hapus data patung" onclick="openDeleteModel(${target})" ${isFilePreview ? 'disabled' : ''}><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 11H7L6 9Z"/><path class="trash-slots" d="M10 11v6m4-6v6"/></svg></button></div></div>
         <div class="pipeline-rows">
           <div class="pipeline-row"><span><span class="stage-index">01</span>Foto input</span>${chip(info.images_count > 0, `${info.images_count} foto`, 'Belum ada foto')}</div>
           <div class="pipeline-row"><span><span class="stage-index">02</span>COLMAP</span>${chip(info.colmap_done)}</div>
           <div class="pipeline-row"><span><span class="stage-index">03</span>3DGS</span>${chip(info['3dgs_30k'], '30k iter', info['3dgs_7k'] ? '7k iter' : 'Menunggu')}</div>
-          <div class="pipeline-row"><span><span class="stage-index">04</span>SuGaR + OBJ</span>${chip(info.sugar_obj, 'OBJ lengkap', info.sugar_mesh ? 'Mesh kasar' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span><span class="stage-index">04</span>SuGaR</span>${chip(info.sugar_obj, 'Refined lengkap', info.sugar_mesh ? 'Mesh kasar' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>2DGS</span>${chip(info.external_methods?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_methods?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>RaDe-GS</span>${chip(info.external_methods?.radegs?.evaluated, 'Evaluasi tersedia', info.external_methods?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>Ablasi 3DGS</span>${chip(info.ablations?.['3dgs']?.evaluated, 'Evaluasi tersedia', info.ablations?.['3dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
@@ -404,6 +476,8 @@ function renderGrid(data) {
           <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual (4 metode)</span>${chip(info.evaluated)}</div>
           <div class="pipeline-row"><span><span class="stage-index">06</span>Evaluasi geometri</span>${chip(info.geometry_evaluated, '2 metode selesai', !info.has_gt_lidar ? 'Perlu LiDAR' : !info.geometry_settings ? 'Atur LiDAR' : 'Menunggu')}</div>
         </div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="openObjectRegion(${target})" ${isFilePreview ? 'disabled' : ''}>${info.object_region ? 'Ubah batas patung' : 'Atur batas patung'}</button>
+        <div class="model-tools">${objectLinks}</div>
         <details class="dataset-path"><summary>Lihat folder input &amp; output</summary><code>${esc(info.input_path)}</code><code>${esc(info.output_path)}</code><code>${esc(`datasets/${cls}/${mdl}/ground_truth/lidar.ply`)}</code></details>
         <div class="step-buttons">
           <button class="btn btn-primary btn-sm btn-full" onclick="openQueueDialog(${target})">Antrekan model ini</button>

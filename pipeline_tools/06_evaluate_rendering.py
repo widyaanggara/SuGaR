@@ -22,7 +22,8 @@ def training_background(output):
     return bool(options.get('white_background', False))
 
 
-def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_max_size=1600, experiment='baseline'):
+def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_max_size=1600, experiment='baseline',
+                       sugar_stage='refined'):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
     os.environ.setdefault('SUGAR_IMAGE_DEVICE', 'cpu')
     os.environ['SUGAR_IMAGE_DOWNSCALE'] = str(image_downscale)
@@ -70,20 +71,21 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
         import open3d as o3d
         from sugar_scene.sugar_model import SuGaR
         from sugar_utils.spherical_harmonics import SH2RGB
-        checkpoint = torch.load(str(output / manifest['refined_checkpoint']), map_location=wrapper.device)
-        mesh = o3d.io.read_triangle_mesh(str(output / manifest['coarse_mesh']))
-        if not mesh.has_triangles():
+        checkpoint_key = 'coarse_checkpoint' if sugar_stage == 'coarse' else 'refined_checkpoint'
+        checkpoint = torch.load(str(output / manifest[checkpoint_key]), map_location=wrapper.device)
+        mesh = None if sugar_stage == 'coarse' else o3d.io.read_triangle_mesh(str(output / manifest['coarse_mesh']))
+        if mesh is not None and not mesh.has_triangles():
             raise ValueError('Coarse mesh kosong.')
         refined = SuGaR(nerfmodel=wrapper, points=checkpoint['state_dict']['_points'],
             colors=SH2RGB(checkpoint['state_dict']['_sh_coordinates_dc'][:, 0, :]),
-            initialize=False, sh_levels=wrapper.gaussians.active_sh_degree + 1,
+            initialize=sugar_stage == 'coarse', sh_levels=wrapper.gaussians.active_sh_degree + 1,
             keep_track_of_knn=False, knn_to_track=0, beta_mode='average',
             surface_mesh_to_bind=mesh, n_gaussians_per_surface_triangle=manifest['gaussians_per_triangle'])
         refined.load_state_dict(checkpoint['state_dict'])
         refined.eval()
         del checkpoint
     criterion = LPIPS(net_type='vgg', version='0.1').to(wrapper.device).eval()
-    folder = output / 'evaluation'
+    folder = output / ('evaluation_coarse' if method == 'SuGaR' and sugar_stage == 'coarse' else 'evaluation')
     for sub in ('renders', 'ground_truth'):
         (folder / sub).mkdir(parents=True, exist_ok=True)
     result_path = folder / 'metrics.json'
@@ -111,15 +113,16 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
                 Image.fromarray(pixels).save(folder / sub / f'{index:05d}.png')
             logger.log(f"[EVAL] {index + 1}/{len(wrapper.test_cam_list)} {camera.image_name}: PSNR={row['psnr']:.4f}")
     metrics = {key: float(np.mean([row[key] for row in values])) for key in ('psnr', 'ssim', 'lpips')}
-    report = dict(metrics, method=method, representation='gaussian_splatting' if refined is None else 'sugar_hybrid',
+    report = dict(metrics, method=method, representation=('gaussian_splatting' if refined is None else
+                  'sugar_coarse' if sugar_stage == 'coarse' else 'sugar_hybrid'),
                   registered_images=len(wrapper.cam_list) + len(wrapper.test_cam_list),
                   train_images=len(wrapper.cam_list), test_images=len(wrapper.test_cam_list),
                   eval_split_interval=8, white_background=white, per_view=values,
                   lpips_network='vgg', lpips_input_range=[-1, 1],
                   image_downscale=image_downscale, image_max_size=image_max_size,
-                  baseline_iteration=iteration, checkpoint=manifest['refined_checkpoint'] if manifest else
+                  baseline_iteration=iteration, checkpoint=manifest[checkpoint_key] if manifest else
                   'point_cloud/iteration_30000/point_cloud.ply')
-    checkpoint_path = output / manifest['refined_checkpoint'] if manifest else baseline / report['checkpoint']
+    checkpoint_path = output / report['checkpoint']
     report['checkpoint_signature'] = file_signature(checkpoint_path)
     report['visual_protocol'] = specification(image_downscale, image_max_size)
     report['training_image_settings'] = {key: (manifest or recorded_training).get(key)
@@ -142,25 +145,30 @@ def main():
     parser.add_argument('--method', choices=['3DGS', 'SuGaR'], required=True)
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--experiment', choices=['baseline', 'scaffold_anchor'], default='baseline')
+    parser.add_argument('--sugar_stage', choices=('refined', 'coarse'), default='refined',
+                        help='coarse: diagnostik terpisah, tidak menggantikan rekap evaluasi refined.')
     add_resolution_arguments(parser)
     args = parser.parse_args()
     resolution_settings(vars(args))
     if args.gpu < 0:
         parser.error('GPU harus >= 0.')
+    if args.sugar_stage == 'coarse' and args.method != 'SuGaR':
+        parser.error('Diagnostik coarse hanya untuk SuGaR.')
     scene_pairs(args.statue_class, args.model_id)
     logger = ThesisLogger(args.statue_class, args.model_id,
-                          args.method if args.experiment == 'baseline' else args.method + '_scaffold_anchor')
+                          (args.method if args.experiment == 'baseline' else args.method + '_scaffold_anchor')
+                          + ('_diagnostic_coarse' if args.sugar_stage == 'coarse' else ''))
     try:
         with gpu_lock(args.gpu):
             logger.start_stage('Evaluasi_Visual')
             evaluate_rendering(args.statue_class, args.model_id, args.method, args.gpu, logger,
-                               args.image_downscale, args.image_max_size, args.experiment)
+                               args.image_downscale, args.image_max_size, args.experiment, args.sugar_stage)
             logger.end_stage('Evaluasi_Visual')
-        logger.finalize(True)
+        logger.finalize(True, export_summary=args.sugar_stage != 'coarse')
         return 0
     except Exception as exc:
         logger.log(f'[ERROR] Evaluasi visual gagal: {exc}', level='error')
-        logger.finalize(False)
+        logger.finalize(False, export_summary=args.sugar_stage != 'coarse')
         return 1
 
 

@@ -69,6 +69,8 @@ def run(args):
         raise ValueError('--mesh_only tidak dapat digabung dengan --evaluate_only atau --train_only.')
     scene_pairs(args.statue_class, args.model_id)
     scene = ROOT / 'datasets' / args.statue_class / args.model_id
+    from pipeline_tools.object_region import resolve_region, object_arguments
+    region = resolve_region(scene, getattr(args, 'object_region_json', None))
     experiment = getattr(args, 'experiment', 'baseline')
     output = output_base(ROOT, experiment) / args.method / args.statue_class / args.model_id
     initial_ply = Path(args.initial_ply).resolve() if getattr(args, 'initial_ply', None) else None
@@ -182,12 +184,19 @@ def run(args):
     if getattr(args, 'train_only', False):
         stages = stages[:1]
     current_checkpoint = file_signature(checkpoint(output)) if trained(output) else None
+    def export_object_if_requested():
+        if region is not None and not args.evaluate_only and not getattr(args, 'train_only', False):
+            subprocess.run([args.python, '-u', str(ROOT / 'pipeline_tools/object_mesh.py'),
+                '--statue_class', args.statue_class, '--model_id', args.model_id,
+                '--method', args.method, '--experiment', experiment, '--optional', *object_arguments(region)],
+                cwd=repo, env=env, check=True)
     if (not mesh_only and not args.no_resume and not args.evaluate_only and skip_training and visual_metrics(output)
             and mesh_path(output, args.method).is_file() and previous_run.get('evaluated_checkpoint') == current_checkpoint
             and previous_run.get('evaluated_protocol') == protocol
             and (args.method != 'radegs' or (previous_run.get('mesh_backend', 'native') == mesh_backend
                  and previous_run.get('mesh_checkpoint') == current_checkpoint))):
         print('[SKIP] Training, mesh, dan evaluasi metode sudah lengkap dan cocok.', flush=True)
+        export_object_if_requested()
         return
     for stage, command in stages:
         if stage == 'Rendering' and args.evaluate_only and args.method == '2dgs':
@@ -296,6 +305,7 @@ def run(args):
         previous_run['evaluated_checkpoint'] = file_signature(checkpoint(output))
         previous_run['evaluated_protocol'] = protocol
         atomic_json(receipt, previous_run)
+    export_object_if_requested()
 
 
 def main():
@@ -320,6 +330,7 @@ def main():
                         help='scalable memakai mesh_extract_tnt.py (ScalableTSDFVolume), bukan VoxelBlockGrid.')
     parser.add_argument('--experiment', choices=('baseline', 'scaffold_anchor'), default='baseline')
     parser.add_argument('--initial_ply')
+    parser.add_argument('--object_region_json')
     args = parser.parse_args()
     with gpu_lock(args.gpu):
         run(args)

@@ -19,6 +19,8 @@ from pipeline_tools.init_dataset_folders import initialize_workspace
 from pipeline_tools.gpu_lock import gpu_lock
 from web_dashboard.job_queue import JobQueue
 from web_dashboard.model_cleanup import delete_model_data
+from pipeline_tools.object_region import read_region, save_region, object_arguments
+from pipeline_tools.object_mesh import object_status
 from pipeline_tools.external_methods import METHODS as EXTERNAL_METHODS, trained, visual_metrics, output_base
 from web_dashboard.metrics_export import build_excel
 from pipeline_tools.run_settings import (resolution_settings, colmap_settings, colmap_arguments,
@@ -52,6 +54,7 @@ def get_project_status(root=PROJECT_ROOT):
         all_evaluated = evaluated and all(value['evaluated'] for value in external_status.values())
         scale = scales.get(cls, {}).get(mdl)
         options = geometry_settings.get(cls, {}).get(mdl)
+        region = read_region(scene)
         geometry_methods = {method: geometry_result_current(root, cls, mdl, method, scale, options)
                             for method in ('3DGS', 'SuGaR')}
         result.setdefault(cls, {})[mdl] = {
@@ -62,6 +65,9 @@ def get_project_status(root=PROJECT_ROOT):
             "has_gt_lidar": nonempty_file(scene / "ground_truth/lidar.ply"),
             "geometry_scale_factor": scale,
             "geometry_settings": options,
+            "object_region": region,
+            "object_meshes": {key: object_status(root / 'outputs' / key / cls / mdl, region)
+                              for key in ('sugar', '2dgs', 'radegs')},
             "geometry_sources": {method: geometry_source_ready(root, cls, mdl, method)
                                  for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')},
             "geometry_methods": geometry_methods, "geometry_evaluated": all(geometry_methods.values()),
@@ -110,8 +116,10 @@ def get_metrics_table(root=PROJECT_ROOT):
 def get_preview_images(cls, mdl, root=PROJECT_ROOT):
     scene_pairs(cls, mdl)
     items = []
-    for method in ("3dgs", "sugar", "2dgs", "radegs"):
-        folder = Path(root) / "outputs" / method / cls / mdl / ('test/ours_30000/renders' if method in EXTERNAL_METHODS else 'evaluation/renders')
+    for method in ("3dgs", "sugar", "sugar_coarse", "2dgs", "radegs"):
+        folder = Path(root) / 'outputs' / ('sugar' if method == 'sugar_coarse' else method) / cls / mdl
+        folder = folder / ('test/ours_30000/renders' if method in EXTERNAL_METHODS else
+                           'evaluation_coarse/renders' if method == 'sugar_coarse' else 'evaluation/renders')
         for index, path in enumerate(media_files(folder)[:3]):
             items.append({"src": "/static/" + path.relative_to(root).as_posix(),
                           "label": f"{method} test view #{index + 1}", "type": method})
@@ -138,6 +146,8 @@ def build_command(job, root=PROJECT_ROOT):
                 '--visual_protocol', job.get('visual_protocol', 'legacy'), *image_args]
         if action == 'evaluate_visual':
             args.append('--evaluate_only')
+        else:
+            args.extend(object_arguments(job.get('object_region')))
         if external_method == 'radegs':
             args.extend(['--mesh_backend', job.get('radegs_mesh_backend', 'scalable')])
         if job.get('resume', True) is False:
@@ -146,7 +156,10 @@ def build_command(job, root=PROJECT_ROOT):
     if action == "full_pipeline":
         script = "batch_run_all.py"
         args = ["--class_name", cls, "--model_id", mdl, *gpu,
-                *sugar_arguments(job)]
+                *sugar_arguments(job), '--sugar_mesh_export', job.get('sugar_mesh_export', 'obj'),
+                *object_arguments(job.get('object_region'))]
+        if job.get('sugar_diagnostics', False):
+            args.append('--sugar_diagnostics')
         if job.get('include_external', False):
             args.extend(['--include_external', '--python_2dgs', job.get('python_2dgs') or sys.executable,
                          '--python_radegs', job.get('python_radegs') or sys.executable,
@@ -177,7 +190,8 @@ def build_command(job, root=PROJECT_ROOT):
     elif action == "sugar":
         script, args = "04_train_sugar.py", ["-s", str(scene), "-c",
             str(root / "outputs/3dgs" / cls / mdl), *common, *gpu,
-            *sugar_arguments(job)]
+            *sugar_arguments(job), '--mesh_export', job.get('sugar_mesh_export', 'obj'),
+            *object_arguments(job.get('object_region'))]
     elif action == "evaluate_visual":
         script, args = "06_evaluate_rendering.py", [*common, *gpu, "--method", job["evaluation_method"]]
     elif action == "evaluate":
@@ -245,6 +259,10 @@ def prepare_jobs(data, root=PROJECT_ROOT):
         raise ValueError("Pilih satu kelas dan satu model untuk tahap ini.")
     pairs = scene_pairs(cls, mdl)
     settings = {**resolution_settings(data), **colmap_settings(data), **sugar_settings(data)}
+    mesh_export = data.get('sugar_mesh_export', 'obj')
+    diagnostics = data.get('sugar_diagnostics', False)
+    if mesh_export not in ('obj', 'surface') or not isinstance(diagnostics, bool):
+        raise ValueError('Pilihan ekspor/diagnostik SuGaR tidak valid.')
     references = research_presets()
     selected_sugar = sugar_settings(data)
     source_preset = next((key for key, preset in references['presets'].items()
@@ -355,6 +373,8 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                              external_python=external_python, external_resolution=external_resolution,
                              radegs_profile=radegs_profile, visual_protocol='shared',
                              radegs_mesh_backend=radegs_mesh_backend,
+                             sugar_mesh_export=mesh_export, sugar_diagnostics=diagnostics,
+                             object_region=read_region(Path(root) / 'datasets' / cls / mdl),
                              experiment=experiment, **scaffold,
                              pipeline_start=pipeline_start,
                              resume=data.get("resume", True) is True,
@@ -439,6 +459,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 raise ValueError("Body harus berupa objek JSON.")
             if path == '/api/model/delete':
                 self.send_json(delete_model_data(self.queue, data))
+            elif path == '/api/object-region':
+                cls, mdl = data.get('class_name'), data.get('model_id')
+                if not isinstance(cls, str) or not isinstance(mdl, str) or not cls or not mdl:
+                    raise ValueError('Pilih satu patung untuk batas objek.')
+                scene_pairs(cls, mdl)
+                self.send_json({'object_region': save_region(self.root / 'datasets' / cls / mdl, data.get('region'))})
             elif path == '/api/geometry-scales':
                 self.send_json({'scales': save_geometry_scales(data.get('scales'), self.root)})
             elif path == '/api/geometry-settings':

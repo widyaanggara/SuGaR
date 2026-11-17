@@ -13,6 +13,7 @@ from pipeline_tools.dataset_registry import (CATALOG, has_checkpoint, has_colmap
 from pipeline_tools.run_settings import (add_resolution_arguments, resolution_settings,
     training_matches, evaluation_matches, colmap_settings,
     add_colmap_arguments, colmap_arguments, sugar_settings, sugar_arguments)
+from pipeline_tools.object_region import resolve_region
 
 
 def run_stage(script, arguments, root=PROJECT_ROOT):
@@ -31,8 +32,13 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          regularization='dn_consistency', experiment='baseline', scaffold_repo=None,
                          scaffold_python=None, scaffold_iterations=30000, scaffold_resolution=1,
                          include_external=False, python_2dgs=None, python_radegs=None, external_resolution=-1,
-                         radegs_profile='yaml', visual_protocol='shared', radegs_mesh_backend='scalable'):
+                         radegs_profile='yaml', visual_protocol='shared', radegs_mesh_backend='scalable',
+                         sugar_mesh_export='obj', sugar_diagnostics=False, object_region=None):
     scene_dir, root = Path(scene_dir), Path(root)
+    from pipeline_tools.object_region import validate_region, object_arguments
+    object_region = validate_region(object_region)
+    if sugar_mesh_export not in ('obj', 'surface'):
+        raise ValueError('Ekspor SuGaR harus obj atau surface.')
     if experiment not in ('baseline', 'scaffold_anchor'):
         raise ValueError('Unknown experiment.')
     if experiment == 'scaffold_anchor' and not scaffold_repo:
@@ -112,15 +118,20 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
         sugar_matches = (config.get('decimation_target', config.get('target_triangles')) == vertices and config.get('regularization') == regularization
                          and config.get('gaussians_per_triangle') == gaussians_per_triangle
                          and config.get('refinement_iterations') == {'short': 2000, 'medium': 7000, 'long': 15000}[refinement_time]
+                         and bool(config.get('textured_mesh')) == (sugar_mesh_export == 'obj')
                          and config.get('image_downscale') == image_downscale and config.get('image_max_size') == image_max_size)
     if not skip_sugar and not (resume and not trained_3dgs and sugar_matches):
         run_stage("04_train_sugar.py", ["-s", scene_dir, "-c", out_3dgs, *common,
                   '-o', out_sugar, *experiment_args,
                   "--gpu", gpu, *sugar_arguments(sugar_config), *image_args,
+                  '--mesh_export', sugar_mesh_export, *object_arguments(None),
                   *([] if resume else ['--no_resume'])], root)
         trained_sugar = True
     elif not skip_sugar:
         print('[RESUME] Hasil SuGaR sudah lengkap dan konfigurasinya cocok; dilewati.', flush=True)
+    if not skip_sugar and object_region:
+        run_stage('object_mesh.py', [*common, '--method', 'sugar', *experiment_args,
+                                    '--optional', *object_arguments(object_region)], root)
     if include_external:
         for method, python in (('2dgs', python_2dgs), ('radegs', python_radegs)):
             run_stage('run_external_method.py', [*common, '--method', method,
@@ -137,12 +148,16 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                 run_stage("06_evaluate_rendering.py", [*common, "--method", method, "--gpu", gpu, *image_args, *experiment_args], root)
             else:
                 print(f'[RESUME] Evaluasi visual {method} sudah lengkap dan cocok; dilewati.', flush=True)
+        if sugar_diagnostics and not skip_sugar:
+            run_stage('06_evaluate_rendering.py', [*common, '--method', 'SuGaR', '--sugar_stage', 'coarse',
+                      '--gpu', gpu, *image_args, *experiment_args], root)
     if include_external and not skip_evaluation:
         for method, python in (('2dgs', python_2dgs), ('radegs', python_radegs)):
             args = [*common, '--method', method, '--python', python or sys.executable,
                     '--gpu', gpu, '--resolution', external_resolution, '--experiment', experiment,
                     *initial_args, '--postprocess_only', '--radegs_profile', radegs_profile,
                     '--visual_protocol', visual_protocol, *image_args,
+                    *object_arguments(object_region),
                     *([] if resume else ['--no_resume'])]
             if method == 'radegs':
                 args.extend(['--mesh_backend', radegs_mesh_backend])
@@ -174,6 +189,9 @@ def main():
     parser.add_argument('--radegs_mesh_backend', choices=('native', 'scalable'), default='scalable',
                         help='Backend ekstraksi mesh RaDe-GS; scalable menghindari jalur VoxelBlockGrid.')
     parser.add_argument('--visual_protocol', choices=('shared', 'legacy'), default='shared')
+    parser.add_argument('--sugar_mesh_export', choices=('obj', 'surface'), default='obj')
+    parser.add_argument('--sugar_diagnostics', action='store_true')
+    parser.add_argument('--object_region_json')
     add_resolution_arguments(parser, colmap=True)
     add_colmap_arguments(parser)
     args = parser.parse_args()
@@ -206,7 +224,10 @@ def main():
                 scaffold_resolution=args.scaffold_resolution, include_external=args.include_external,
                 python_2dgs=args.python_2dgs, python_radegs=args.python_radegs,
                 external_resolution=args.external_resolution, radegs_profile=args.radegs_profile,
-                visual_protocol=args.visual_protocol, radegs_mesh_backend=args.radegs_mesh_backend)
+                visual_protocol=args.visual_protocol, radegs_mesh_backend=args.radegs_mesh_backend,
+                sugar_mesh_export=args.sugar_mesh_export, sugar_diagnostics=args.sugar_diagnostics,
+                object_region=resolve_region(
+                    PROJECT_ROOT / 'datasets' / cls / mdl, args.object_region_json))
             results.append({"target": f"{cls}/{mdl}", "status": status})
         except Exception as exc:
             print(f"[ERROR] {cls}/{mdl}: {exc}", flush=True)

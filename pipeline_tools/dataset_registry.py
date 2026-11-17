@@ -50,8 +50,10 @@ def has_sugar_result(output):
         baseline = output.parents[2] / '3dgs' / output.parent.name / output.name / 'point_cloud/iteration_7000/point_cloud.ply'
         if 'baseline_signature' in manifest and manifest['baseline_signature'] != file_signature(baseline):
             return False
+        keys = ('coarse_mesh', 'refined_checkpoint',
+                'textured_mesh' if manifest.get('textured_mesh') else 'surface_mesh')
         return all((output / manifest[key]).is_file() and (output / manifest[key]).stat().st_size > 0
-                   for key in ("coarse_mesh", "refined_checkpoint", "textured_mesh"))
+                   for key in keys)
     except (OSError, ValueError, KeyError, TypeError):
         return False
 

@@ -29,8 +29,9 @@ tetap mengikuti protokol bersama.
    3DGS, mencari pusat perpotongan arah pandang secara robust, lalu membatasi
    mesh dengan kotak berdasarkan jarak, bidang pandang dan margin 15%.
    Pengaturan manual lama tidak dipakai oleh pekerjaan dashboard baru.
-5. Jalankan Pipeline Lengkap seperti biasa. Hasil tambahan dapat diunduh melalui
-   tautan **Mesh SuGaR fokus**, dengan file `outputs/sugar/Kelas/model_id/object_mesh/object.ply`.
+5. Jalankan Pipeline Lengkap seperti biasa. Pemfokusan diterapkan otomatis pada
+   mesh hasil akhir di `outputs/sugar/Kelas/model_id/object_mesh/object.ply`, tanpa
+   tombol atau tautan tambahan pada kartu model.
    Hasil ablasi berada di struktur yang sama di `outputs/ablations/scaffold_anchor/`.
 
 Metode ini membatasi luas scene, bukan segmentasi semantik. Ia mengasumsikan

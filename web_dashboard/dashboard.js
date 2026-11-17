@@ -407,10 +407,6 @@ function renderGrid(data) {
     for (const [mdl, info] of Object.entries(models)) {
       const target = `'${cls}','${mdl}'`;
       const modelLabel = info.display_name || defaultModelName(mdl);
-      const objectLinks = Object.entries({sugar: 'SuGaR fokus'}).map(([key, label]) =>
-        info.object_meshes?.[key] === 'ready'
-          ? `<a class="btn-name" href="/static/outputs/${key}/${cls}/${mdl}/object_mesh/object.ply" download>Mesh ${label}</a>`
-          : ['error', 'stale'].includes(info.object_meshes?.[key]) ? `<span class="model-reference">Mesh ${label}: periksa batas/log</span>` : '').join('');
       cells += `<div class="model-cell">
         <div class="model-label"><div class="model-identity"><span class="model-title">${esc(modelLabel)}</span><span class="model-code">${esc(mdl)}</span></div><div class="model-tools">${info.has_video ? chip(true, 'Video') : ''}<button type="button" class="btn-name" aria-label="Ubah nama ${esc(cls)} ${esc(mdl)}" onclick="editModelName(${target})">Ubah nama</button><button type="button" class="btn-name btn-delete-model" aria-label="Hapus data ${esc(cls)} ${esc(mdl)}" title="Hapus data patung" onclick="openDeleteModel(${target})" ${isFilePreview ? 'disabled' : ''}><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 11H7L6 9Z"/><path class="trash-slots" d="M10 11v6m4-6v6"/></svg></button></div></div>
         <div class="pipeline-rows">
@@ -427,7 +423,6 @@ function renderGrid(data) {
           <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual (4 metode)</span>${chip(info.evaluated)}</div>
           <div class="pipeline-row"><span><span class="stage-index">06</span>Evaluasi geometri</span>${chip(info.geometry_evaluated, '2 metode selesai', !info.has_gt_lidar ? 'Perlu LiDAR' : !info.geometry_settings ? 'Atur LiDAR' : 'Menunggu')}</div>
         </div>
-        <div class="model-tools">${objectLinks}</div>
         <details class="dataset-path"><summary>Lihat folder input &amp; output</summary><code>${esc(info.input_path)}</code><code>${esc(info.output_path)}</code><code>${esc(`datasets/${cls}/${mdl}/ground_truth/lidar.ply`)}</code></details>
         <div class="step-buttons">
           <button class="btn btn-primary btn-sm btn-full" onclick="openQueueDialog(${target})">Antrekan model ini</button>

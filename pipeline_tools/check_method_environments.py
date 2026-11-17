@@ -8,6 +8,19 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def method_entrypoints(repo, scripts):
+    entries = [(script, [script]) for script in scripts]
+    # Validate the actual shared-protocol launcher too: native --help alone
+    # cannot catch adapter import-order or dependency failures.
+    for script in scripts:
+        if script in ('train.py', 'render.py', 'metrics.py', 'metric.py'):
+            entries.append((f'shared {script}', [
+                str(ROOT / 'pipeline_tools/external_visual_launcher.py'),
+                '--repo', str(repo), script,
+            ]))
+    return entries
+
+
 def check(name, python, repo, entrypoints, gpu):
     print(f'\n[{name}] Python: {python}\nRepository: {repo}', flush=True)
     if not (repo / 'train.py').is_file():
@@ -53,9 +66,9 @@ def main():
         parser.error('GPU harus >= 0.')
     probes = [
         ('2DGS', args.python_2dgs, ROOT / 'external/2DGS',
-         [(script, [script]) for script in ('train.py', 'render.py', 'metrics.py')]),
+         method_entrypoints(ROOT / 'external/2DGS', ('train.py', 'render.py', 'metrics.py'))),
         ('RaDe-GS', args.python_radegs, ROOT / 'external/RaDe-GS',
-         [(script, [script]) for script in ('train.py', 'render.py', 'metric.py', 'mesh_extract.py')]),
+         method_entrypoints(ROOT / 'external/RaDe-GS', ('train.py', 'render.py', 'metric.py', 'mesh_extract.py'))),
         ('Scaffold-GS', args.scaffold_python, args.scaffold_repo.resolve(),
          [('adapter training', [str(ROOT / 'pipeline_tools/scaffold_train.py'), '--repo', str(args.scaffold_repo.resolve())])]),
     ]

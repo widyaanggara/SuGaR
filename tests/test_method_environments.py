@@ -1,0 +1,30 @@
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+from pipeline_tools.check_method_environments import check, method_entrypoints
+
+
+class MethodEnvironmentTests(unittest.TestCase):
+    def test_launcher_failure_fails_preflight_even_when_native_probes_pass(self):
+        for metric in ('metrics.py', 'metric.py'):
+            with self.subTest(metric=metric):
+                repo = Path('/external/repo')
+                entries = method_entrypoints(repo, ('train.py', 'render.py', metric))
+                def run(command, **kwargs):
+                    wrapped = any('external_visual_launcher.py' in arg for arg in command)
+                    return SimpleNamespace(returncode=int(wrapped), stdout='', stderr='import failure' if wrapped else '')
+                with patch.object(Path, 'is_file', return_value=True), \
+                        patch('pipeline_tools.check_method_environments.subprocess.run', side_effect=run) as probe, \
+                        patch('builtins.print'):
+                    self.assertFalse(check('method', 'python', repo, entries, 0))
+                self.assertEqual(probe.call_count, 7)
+                shared = [call.args[0] for call in probe.call_args_list
+                          if any('external_visual_launcher.py' in arg for arg in call.args[0])]
+                self.assertEqual([command[-2:] for command in shared],
+                                 [[script, '--help'] for script in ('train.py', 'render.py', metric)])
+
+
+if __name__ == '__main__':
+    unittest.main()

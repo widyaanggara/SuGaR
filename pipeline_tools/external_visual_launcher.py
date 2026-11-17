@@ -24,6 +24,9 @@ def main():
     sys.path.insert(0, str(args.repo.resolve()))
     from pipeline_tools.visual_protocol import install_camera_sizing, install_metrics
     if args.visual_protocol == 'shared' and args.script in ('train.py', 'render.py'):
+        # Initialize scene first, as native entry points do. camera_utils imports
+        # scene.cameras while scene.__init__ imports camera_utils functions.
+        import scene
         import utils.camera_utils as camera_utils
         install_camera_sizing(camera_utils, args.image_downscale, args.image_max_size)
         if args.script == 'render.py' and (args.repo / 'metrics.py').is_file():

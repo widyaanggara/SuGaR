@@ -18,7 +18,7 @@ from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.logger_utils import ThesisLogger
 
 
-def commands(method, python, scene, output, resolution=1):
+def commands(method, python, scene, output, resolution=-1):
     common = ['-s', str(scene), '-m', str(output)]
     train = [python, '-u', 'train.py', *common, '--iterations', '30000', '--eval',
              '-r', str(resolution), '--checkpoint_iterations', '7000', '15000', '30000']
@@ -74,9 +74,18 @@ def run(args):
     if not (repo / 'train.py').is_file():
         raise ValueError(f'Repository belum tersedia: {repo}')
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(args.gpu), PYTHONUNBUFFERED='1')
+    print(f'[CONFIG] Metode={args.method}; repository={repo}; python={args.python}; '
+          f'resolusi={args.resolution} '
+          + ('(otomatis, lebar maksimum 1600 px)' if args.resolution == -1 else '(faktor downscale)'),
+          flush=True)
     # Fail before writing research artifacts if the selected environment is not usable.
-    subprocess.run([args.python, '-c', 'import torch; assert torch.cuda.is_available(), "CUDA tidak tersedia"'],
-                   cwd=repo, env=env, check=True)
+    try:
+        subprocess.run([args.python, '-c', 'import torch; assert torch.cuda.is_available(), "CUDA tidak tersedia"; '
+                        'print("[GPU]", torch.cuda.get_device_name(0), flush=True)'],
+                       cwd=repo, env=env, check=True)
+    except FileNotFoundError as exc:
+        raise ValueError(f'Python metode tidak ditemukan: {args.python}. '
+                         'Periksa path environment pada server (bin/python, bukan bin/pytho).') from exc
     output.mkdir(parents=True, exist_ok=True)
     receipt = output / 'togoglab_run.json'
     identity = {'scene': scene_identity(scene), 'resolution': args.resolution, 'experiment': experiment,
@@ -177,7 +186,8 @@ def main():
     parser.add_argument('--model_id', required=True)
     parser.add_argument('--python', default=sys.executable)
     parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--resolution', type=int, choices=(1, 2, 4, 8), default=1)
+    parser.add_argument('--resolution', type=int, choices=(-1, 1, 2, 4, 8), default=-1,
+                        help='-1: otomatis, lebar maksimum 1600 px; 1: ukuran asli; 2/4/8: downscale.')
     parser.add_argument('--no_resume', action='store_true')
     parser.add_argument('--evaluate_only', action='store_true')
     parser.add_argument('--train_only', action='store_true')

@@ -30,7 +30,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          colmap_sequential_overlap=10, gaussians_per_triangle=1,
                          regularization='dn_consistency', experiment='baseline', scaffold_repo=None,
                          scaffold_python=None, scaffold_iterations=30000, scaffold_resolution=1,
-                         include_external=False, python_2dgs=None, python_radegs=None, external_resolution=1):
+                         include_external=False, python_2dgs=None, python_radegs=None, external_resolution=-1):
     scene_dir, root = Path(scene_dir), Path(root)
     if experiment not in ('baseline', 'scaffold_anchor'):
         raise ValueError('Unknown experiment.')
@@ -163,7 +163,7 @@ def main():
     parser.add_argument('--include_external', action='store_true', help='Run 2DGS and RaDe-GS before the next statue.')
     parser.add_argument('--python_2dgs', default=sys.executable)
     parser.add_argument('--python_radegs', default=sys.executable)
-    parser.add_argument('--external_resolution', type=int, choices=(1, 2, 4, 8), default=1)
+    parser.add_argument('--external_resolution', type=int, choices=(-1, 1, 2, 4, 8), default=-1)
     add_resolution_arguments(parser, colmap=True)
     add_colmap_arguments(parser)
     args = parser.parse_args()

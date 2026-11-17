@@ -650,7 +650,7 @@ async function submitQueueDialog() {
     python_2dgs: ($('queuePython2dgs').value || '').trim(),
     python_radegs: ($('queuePythonRadegs').value || '').trim(),
     external_python: ($('queueExternalPython').value || '').trim(),
-    external_resolution: Number($(action === 'full_pipeline' ? 'queueFullResolution' : 'queueExternalResolution').value || 1),
+    external_resolution: Number($(action === 'full_pipeline' ? 'queueFullResolution' : 'queueExternalResolution').value || -1),
     scaffold_repo: $('queueScaffoldRepo').value.trim(),
     scaffold_python: $('queueScaffoldPython').value.trim(),
     scaffold_iterations: Number($('queueScaffoldIterations').value),

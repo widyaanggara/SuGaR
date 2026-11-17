@@ -261,7 +261,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
         raise ValueError("Metode evaluasi harus 3DGS, SuGaR, atau keduanya untuk evaluasi.")
     methods = ('3DGS', 'SuGaR') if method == 'both' else (method,)
     external_python = data.get('external_python') or sys.executable
-    external_resolution = data.get('external_resolution', 1)
+    external_resolution = data.get('external_resolution', -1)
     include_external = data.get('include_external', True)
     if not isinstance(include_external, bool):
         raise ValueError('Pilihan pipeline empat metode harus boolean.')
@@ -272,8 +272,8 @@ def prepare_jobs(data, root=PROJECT_ROOT):
             raise ValueError('Python metode harus berupa path executable.')
     if not isinstance(external_python, str) or '\x00' in external_python:
         raise ValueError('Python metode harus berupa path executable.')
-    if type(external_resolution) is not int or external_resolution not in (1, 2, 4, 8):
-        raise ValueError('Downscale metode harus 1, 2, 4, atau 8.')
+    if type(external_resolution) is not int or external_resolution not in (-1, 1, 2, 4, 8):
+        raise ValueError('Resolusi metode harus -1 (otomatis), 1, 2, 4, atau 8.')
     external_key = action if action in EXTERNAL_METHODS else {'2DGS': '2dgs', 'RaDe-GS': 'radegs'}.get(method)
     if external_key and action != 'evaluate':
         if not Path(external_python).is_file():

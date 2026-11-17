@@ -40,6 +40,57 @@ class ExternalMethodTests(unittest.TestCase):
             self.assertEqual(command[command.index('--python') + 1], sys.executable)
             self.assertNotIn('--vertices', command)
 
+    def test_auto_resolution_reaches_native_training_from_queue(self):
+        for action in ('radegs', 'full_pipeline'):
+            jobs, _ = prepare_jobs(dict(action=action, class_name='Penabuh', model_id='model_01',
+                                        external_python=sys.executable, external_resolution=-1), self.root)
+            command = build_command(jobs[0], self.root)
+            flag = '--external_resolution' if action == 'full_pipeline' else '--resolution'
+            self.assertEqual(command[command.index(flag) + 1], '-1')
+        stages = dict(runner.commands('radegs', sys.executable, self.root, self.root / 'output', -1))
+        self.assertEqual(stages['Training'][stages['Training'].index('-r') + 1], '-1')
+        self.assertEqual(stages['Ekstraksi_Mesh'][stages['Ekstraksi_Mesh'].index('-r') + 1], '2')
+
+    def test_new_jobs_default_to_auto_but_existing_jobs_keep_resolution(self):
+        for action in ('radegs', 'full_pipeline'):
+            jobs, _ = prepare_jobs(dict(action=action, class_name='Penabuh', model_id='model_01',
+                                        external_python=sys.executable), self.root)
+            self.assertEqual(jobs[0]['external_resolution'], -1)
+            flag = '--external_resolution' if action == 'full_pipeline' else '--resolution'
+            for resolution in (-1, 1, 2):
+                job = dict(jobs[0], external_resolution=resolution)
+                command = build_command(job, self.root)
+                self.assertEqual(command[command.index(flag) + 1], str(resolution))
+            legacy = dict(jobs[0])
+            del legacy['external_resolution']
+            command = build_command(legacy, self.root)
+            self.assertEqual(command[command.index(flag) + 1], '1')
+
+    def test_resolution_change_rejects_resume_before_starting_training(self):
+        output = self.root / 'outputs/radegs/Penabuh/model_01'
+        identity = {'scene': runner.scene_identity(self.root / 'datasets/Penabuh/model_01'),
+                    'resolution': 1, 'experiment': 'baseline', 'initial_sha256': None}
+        self.write(output / 'togoglab_run.json', json.dumps({'identity': identity}))
+        self.write(output / 'chkpnt15000.pth', 'saved training')
+        args = argparse.Namespace(statue_class='Penabuh', model_id='model_01', method='radegs',
+                                  gpu=0, python=sys.executable, evaluate_only=False, no_resume=False, resolution=-1)
+        with patch.object(runner, 'ROOT', self.root), patch.object(runner.subprocess, 'run'), \
+             patch.object(runner.subprocess, 'Popen') as popen:
+            with self.assertRaisesRegex(ValueError, 'Konfigurasi/dataset berubah'):
+                runner.run(args)
+            popen.assert_not_called()
+        self.assertEqual((output / 'chkpnt15000.pth').read_text(), 'saved training')
+
+    def test_missing_python_reports_environment_path_before_writing_outputs(self):
+        args = argparse.Namespace(statue_class='Penabuh', model_id='model_01', method='radegs',
+                                  gpu=0, python='/env/radegs/bin/pytho', evaluate_only=False,
+                                  no_resume=False, resolution=-1)
+        with patch.object(runner, 'ROOT', self.root), \
+             patch.object(runner.subprocess, 'run', side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(ValueError, 'Python metode tidak ditemukan'):
+                runner.run(args)
+        self.assertFalse((self.root / 'outputs/radegs/Penabuh/model_01').exists())
+
     def test_native_artifacts_status_metrics_and_geometry_paths(self):
         for key, label in (('2dgs', '2DGS'), ('radegs', 'RaDe-GS')):
             output = self.root / 'outputs' / key / 'Penabuh/model_01'

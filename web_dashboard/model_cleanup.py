@@ -16,9 +16,12 @@ def delete_model_data(queue, data):
         raise ValueError('Ketik ID patung lengkap untuk mengonfirmasi penghapusan.')
     scope = data.get('scope', 'all')
     labels = {'sugar': 'SuGaR', '2dgs': '2DGS', 'radegs': 'RaDe-GS'}
-    if scope not in ('all', *labels):
+    if scope not in ('all', 'results', *labels):
         raise ValueError('Pilihan penghapusan tidak dikenal.')
     whole = scope == 'all'
+    results = scope == 'results'
+    selected_labels = ('3DGS', *labels.values()) if results else (() if whole else (labels[scope],))
+    report_labels = {name for label in selected_labels for name in (label, label + '_scaffold_anchor')}
     root = queue.root.resolve()
 
     def checked(path):
@@ -39,14 +42,18 @@ def delete_model_data(queue, data):
         paths = [root / 'datasets' / cls / mdl] if whole else []
         for base in ('outputs', 'outputs/ablations/scaffold_anchor'):
             methods = (('3dgs', 'sugar', '2dgs', 'radegs', 'scaffold', 'scaffold_gs', '3dgs_scaffold_anchor', 'sugar_scaffold_anchor')
-                       if whole else ((scope, 'sugar_scaffold_anchor') if scope == 'sugar' else (scope,)))
+                       if whole else ('3dgs', 'sugar', '2dgs', 'radegs', '3dgs_scaffold_anchor', 'sugar_scaffold_anchor')
+                       if results else ((scope, 'sugar_scaffold_anchor') if scope == 'sugar' else (scope,)))
             for method in methods:
                 paths.append(root / base / method / cls / mdl)
-        log_pattern = f'{cls}_{mdl}_' + ('*' if whole else labels[scope] + '_*')
-        paths.extend((root / 'outputs/logs/training_logs').glob(log_pattern))
+        log_patterns = ['*'] if whole else [label + '_*' for label in selected_labels]
+        for pattern in log_patterns:
+            paths.extend((root / 'outputs/logs/training_logs').glob(f'{cls}_{mdl}_{pattern}'))
         def affected_job(job):
             if (job['class_name'], job['model_id']) != (cls, mdl):
                 return False
+            if results:
+                return job['action'] in ('3dgs', 'sugar', '2dgs', 'radegs', 'full_pipeline', 'evaluate', 'evaluate_visual')
             return (whole or job['action'] == scope
                     or (job['action'] in ('evaluate', 'evaluate_visual')
                         and job.get('evaluation_method') == labels[scope])
@@ -76,7 +83,7 @@ def delete_model_data(queue, data):
                     raise ValueError('Kolom metode rekap tidak ditemukan; penghapusan dibatalkan.')
                 rows = [r for r in reader if not (
                     (r['Kelas'], r['Model ID']) == (cls, mdl)
-                    and (whole or r['Metode'] in (labels[scope], labels[scope] + '_scaffold_anchor')))]
+                    and (whole or r['Metode'] in report_labels))]
             stream = io.StringIO(newline='')
             writer = csv.DictWriter(stream, fieldnames=fields)
             writer.writeheader()
@@ -111,4 +118,5 @@ def delete_model_data(queue, data):
         for folder in (('input', 'images', 'raw_video', 'ground_truth') if whole else ()):
             (root / 'datasets' / cls / mdl / folder).mkdir(parents=True, exist_ok=True)
         return {'message': (f'Semua data {cls}/{mdl} telah dihapus. Slot siap diisi kembali.' if whole
+                            else f'Seluruh hasil 3DGS, SuGaR, 2DGS dan RaDe-GS {cls}/{mdl} telah dihapus. Dataset dan COLMAP tetap tersimpan.' if results
                             else f'Hasil {labels[scope]} {cls}/{mdl} telah dihapus. Dataset dan metode lain tetap tersimpan.')}

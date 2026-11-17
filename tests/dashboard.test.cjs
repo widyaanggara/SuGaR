@@ -135,6 +135,18 @@ test('method deletion sends the chosen scope and explains preserved inputs', asy
   }
 });
 
+test('all results deletion explicitly preserves dataset and COLMAP', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  vm.runInContext("openDeleteModel('Dewa', 'model_01')", app.context);
+  app.nodes.get('deleteModelScope').value = 'results';
+  vm.runInContext('updateDeleteModelScope()', app.context);
+  assert.match(app.nodes.get('deleteModelDescription').textContent, /3DGS, SuGaR, 2DGS dan RaDe-GS/);
+  assert.match(app.nodes.get('deleteModelDescription').textContent, /Foto\/video, COLMAP, LiDAR/);
+  await vm.runInContext('deleteModel()', app.context);
+  assert.equal(app.calls.find(([url]) => url === '/api/model/delete')[1].scope, 'results');
+});
+
 test('2DGS and RaDe-GS queue with their Python environment and appear in results', async () => {
   const app = page();
   await app.events.DOMContentLoaded();
@@ -155,26 +167,6 @@ test('2DGS and RaDe-GS queue with their Python environment and appear in results
   await vm.runInContext('refreshMetrics()', app.context);
   assert.match(app.nodes.get('metricsBody').innerHTML, /2DGS/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /RaDe-GS/);
-});
-
-test('object bounds are validated, saved per model, restored and cleared without enqueueing training', async () => {
-  const app = page();
-  await app.events.DOMContentLoaded();
-  vm.runInContext("openObjectRegion('Dewa', 'model_01')", app.context);
-  assert.equal(app.nodes.get('objectRegionDialog').open, true);
-  await vm.runInContext('saveObjectRegion()', app.context);
-  assert.match(app.nodes.get('objectRegionError').textContent, /koordinat/);
-  assert.equal(app.calls.filter(([url]) => url === '/api/object-region').length, 0);
-  for (const [id, value] of Object.entries({regionminX: -1, regionminY: -2, regionminZ: -3,
-    regionmaxX: 1, regionmaxY: 2, regionmaxZ: 3, regionMinTriangles: 50})) app.nodes.get(id).value = String(value);
-  await vm.runInContext('saveObjectRegion()', app.context);
-  assert.deepEqual(app.calls.find(([url]) => url === '/api/object-region')[1], {
-    class_name: 'Dewa', model_id: 'model_01', region: {min: [-1, -2, -3], max: [1, 2, 3], min_triangles: 50}});
-  vm.runInContext("openObjectRegion('Dewa', 'model_01')", app.context);
-  assert.equal(app.nodes.get('regionmaxY').value, 2);
-  await vm.runInContext('saveObjectRegion(true)', app.context);
-  assert.equal(app.calls.filter(([url]) => url === '/api/object-region').at(-1)[1].region, null);
-  assert.equal(app.calls.filter(([url]) => url === '/api/run').length, 0);
 });
 
 test('experimental SuGaR profile and export controls are included in Train All settings', async () => {

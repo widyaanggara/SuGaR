@@ -9,6 +9,8 @@ def validate_region(value):
         return None
     if not isinstance(value, dict):
         raise ValueError('Batas objek harus berupa objek JSON.')
+    if value.get('mode') == 'camera_focus_v1':
+        return {'mode': 'camera_focus_v1'}
     result = {}
     for key in ('min', 'max'):
         vector = value.get(key)

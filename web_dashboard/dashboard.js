@@ -27,56 +27,6 @@ let editingModel = null;
 let modelNameSaving = false;
 let deletingModel = null;
 let modelDeleting = false;
-let editingRegion = null;
-let regionSaving = false;
-
-function openObjectRegion(cls, mdl) {
-  if (isFilePreview || regionSaving) return;
-  editingRegion = {class_name: cls, model_id: mdl};
-  $('objectRegionTarget').textContent = `${modelName(cls, mdl)} · ${cls}/${mdl}`;
-  const region = cachedStatus[cls]?.[mdl]?.object_region;
-  for (const key of ['min', 'max']) for (const [index, axis] of ['X', 'Y', 'Z'].entries()) {
-    $(`region${key}${axis}`).value = region?.[key]?.[index] ?? '';
-  }
-  $('regionMinTriangles').value = region?.min_triangles ?? 50;
-  $('objectRegionError').textContent = '';
-  $('objectRegionDialog').showModal();
-}
-
-function closeObjectRegion() {
-  if (regionSaving) return;
-  $('objectRegionDialog').close();
-  editingRegion = null;
-}
-
-async function saveObjectRegion(clear = false) {
-  if (!editingRegion || regionSaving) return;
-  try {
-    let region = null;
-    if (!clear) {
-      region = {min: [], max: [], min_triangles: Number($('regionMinTriangles').value)};
-      for (const key of ['min', 'max']) for (const axis of ['X', 'Y', 'Z']) {
-        const raw = String($(`region${key}${axis}`).value).trim();
-        if (!raw || !Number.isFinite(Number(raw))) throw new Error('Isi keenam koordinat batas patung.');
-        region[key].push(Number(raw));
-      }
-      if (region.min.some((value, i) => value >= region.max[i])) throw new Error('Minimum harus lebih kecil dari maksimum pada setiap sumbu.');
-      if (!Number.isInteger(region.min_triangles) || region.min_triangles < 0) throw new Error('Ambang fragmen harus bilangan bulat >= 0.');
-    }
-    regionSaving = true;
-    for (const id of ['regionSave', 'regionClear', 'regionCancel']) $(id).disabled = true;
-    await api('/api/object-region', {...editingRegion, region});
-    $('objectRegionDialog').close();
-    editingRegion = null;
-    showToast(clear ? 'Batas patung dihapus untuk pekerjaan berikutnya.' : 'Batas patung disimpan untuk Train All berikutnya.');
-    await refreshAll();
-  } catch (error) { $('objectRegionError').textContent = error.message; }
-  finally {
-    regionSaving = false;
-    for (const id of ['regionSave', 'regionClear', 'regionCancel']) $(id).disabled = false;
-  }
-}
-
 function openDeleteModel(cls, mdl) {
   if (isFilePreview || modelDeleting || !cachedStatus[cls]?.[mdl]) return;
   deletingModel = {class_name: cls, model_id: mdl};
@@ -99,15 +49,16 @@ function updateDeleteModelScope() {
   const labels = {sugar: 'SuGaR', '2dgs': '2DGS', radegs: 'RaDe-GS'};
   $('deleteModelDescription').textContent = scope === 'all'
     ? 'Menghapus seluruh foto/video input, COLMAP, LiDAR, hasil semua metode dan ablasi, evaluasi, log, antrean, nama serta pengaturan patung ini. Slot kembali kosong.'
+    : scope === 'results' ? 'Menghapus seluruh hasil 3DGS, SuGaR, 2DGS dan RaDe-GS pada patung ini, termasuk ablasi, checkpoint, mesh, evaluasi, log dan pekerjaan terkait. Foto/video, COLMAP, LiDAR, batas patung, nama, pengaturan dan anchor Scaffold tetap tersimpan. Untuk training ulang, pilih mulai dari hasil COLMAP.'
     : labels[scope] ? `Menghapus hasil ${labels[scope]} baseline dan ablasi, beserta evaluasi, log dan pekerjaan metode tersebut. Antrean pipeline lengkap yang menunggu untuk patung ini juga dibatalkan. Foto, COLMAP, LiDAR, nama dan hasil metode lain tetap tersimpan.`
-    : 'Pilih salah satu dari empat jenis penghapusan di atas.';
+    : 'Pilih jenis penghapusan di atas.';
   $('deleteModelSubmit').disabled = modelDeleting || !scope;
 }
 
 async function deleteModel() {
   if (!deletingModel || modelDeleting) return;
   const scope = $('deleteModelScope').value;
-  if (!['all', 'sugar', '2dgs', 'radegs'].includes(scope)) {
+  if (!['all', 'results', 'sugar', '2dgs', 'radegs'].includes(scope)) {
     $('deleteModelError').textContent = 'Pilih jenis penghapusan terlebih dahulu.';
     return;
   }
@@ -456,7 +407,7 @@ function renderGrid(data) {
     for (const [mdl, info] of Object.entries(models)) {
       const target = `'${cls}','${mdl}'`;
       const modelLabel = info.display_name || defaultModelName(mdl);
-      const objectLinks = Object.entries({sugar: 'SuGaR', '2dgs': '2DGS', radegs: 'RaDe-GS'}).map(([key, label]) =>
+      const objectLinks = Object.entries({sugar: 'SuGaR fokus'}).map(([key, label]) =>
         info.object_meshes?.[key] === 'ready'
           ? `<a class="btn-name" href="/static/outputs/${key}/${cls}/${mdl}/object_mesh/object.ply" download>Mesh ${label}</a>`
           : ['error', 'stale'].includes(info.object_meshes?.[key]) ? `<span class="model-reference">Mesh ${label}: periksa batas/log</span>` : '').join('');
@@ -476,7 +427,6 @@ function renderGrid(data) {
           <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual (4 metode)</span>${chip(info.evaluated)}</div>
           <div class="pipeline-row"><span><span class="stage-index">06</span>Evaluasi geometri</span>${chip(info.geometry_evaluated, '2 metode selesai', !info.has_gt_lidar ? 'Perlu LiDAR' : !info.geometry_settings ? 'Atur LiDAR' : 'Menunggu')}</div>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="openObjectRegion(${target})" ${isFilePreview ? 'disabled' : ''}>${info.object_region ? 'Ubah batas patung' : 'Atur batas patung'}</button>
         <div class="model-tools">${objectLinks}</div>
         <details class="dataset-path"><summary>Lihat folder input &amp; output</summary><code>${esc(info.input_path)}</code><code>${esc(info.output_path)}</code><code>${esc(`datasets/${cls}/${mdl}/ground_truth/lidar.ply`)}</code></details>
         <div class="step-buttons">

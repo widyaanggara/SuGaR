@@ -314,7 +314,7 @@ def main():
     parser.add_argument('--gaussians_per_triangle', type=int, choices=(1, 3, 4, 6), default=1)
     parser.add_argument('--mesh_export', choices=('obj', 'surface'), default='obj',
                         help='surface mengekspor geometri refined tanpa baking tekstur OBJ.')
-    parser.add_argument('--object_region_json')
+    parser.add_argument('--object_region_json', default='{"mode":"camera_focus_v1"}')
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU device (default: 0).")
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
     add_resolution_arguments(parser)

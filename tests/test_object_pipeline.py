@@ -54,6 +54,7 @@ class ObjectPipelineTests(unittest.TestCase):
         jobs, _ = prepare_jobs(dict(action='full_pipeline', class_name='Dewa', model_id='model_01',
             sugar_mesh_export='surface', sugar_diagnostics=True), self.root)
         save_region(self.scene, {**REGION, 'max': [2, 3, 4]})
+        saved = {'mode': 'camera_focus_v1'}
         self.assertEqual(jobs[0]['object_region'], saved)
         command = build_command(jobs[0], self.root)
         self.assertEqual(json.loads(command[command.index('--object_region_json') + 1]), saved)
@@ -70,7 +71,7 @@ class ObjectPipelineTests(unittest.TestCase):
         post = [args for script, args in stages if script == 'run_external_method.py' and '--postprocess_only' in args]
         self.assertEqual(len(post), 2)
         for args in post:
-            self.assertEqual(json.loads(args[args.index('--object_region_json') + 1]), saved)
+            self.assertNotIn('--object_region_json', args)
 
     def test_surface_only_result_is_ready_for_rendering_and_geometry(self):
         output = self.root / 'outputs/sugar/Dewa/model_01'

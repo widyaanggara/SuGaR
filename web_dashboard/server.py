@@ -54,7 +54,7 @@ def get_project_status(root=PROJECT_ROOT):
         all_evaluated = evaluated and all(value['evaluated'] for value in external_status.values())
         scale = scales.get(cls, {}).get(mdl)
         options = geometry_settings.get(cls, {}).get(mdl)
-        region = read_region(scene)
+        region = {'mode': 'camera_focus_v1'}
         geometry_methods = {method: geometry_result_current(root, cls, mdl, method, scale, options)
                             for method in ('3DGS', 'SuGaR')}
         result.setdefault(cls, {})[mdl] = {
@@ -67,7 +67,7 @@ def get_project_status(root=PROJECT_ROOT):
             "geometry_settings": options,
             "object_region": region,
             "object_meshes": {key: object_status(root / 'outputs' / key / cls / mdl, region)
-                              for key in ('sugar', '2dgs', 'radegs')},
+                              for key in ('sugar',)},
             "geometry_sources": {method: geometry_source_ready(root, cls, mdl, method)
                                  for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')},
             "geometry_methods": geometry_methods, "geometry_evaluated": all(geometry_methods.values()),
@@ -146,8 +146,6 @@ def build_command(job, root=PROJECT_ROOT):
                 '--visual_protocol', job.get('visual_protocol', 'legacy'), *image_args]
         if action == 'evaluate_visual':
             args.append('--evaluate_only')
-        else:
-            args.extend(object_arguments(job.get('object_region')))
         if external_method == 'radegs':
             args.extend(['--mesh_backend', job.get('radegs_mesh_backend', 'scalable')])
         if job.get('resume', True) is False:
@@ -374,7 +372,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                              radegs_profile=radegs_profile, visual_protocol='shared',
                              radegs_mesh_backend=radegs_mesh_backend,
                              sugar_mesh_export=mesh_export, sugar_diagnostics=diagnostics,
-                             object_region=read_region(Path(root) / 'datasets' / cls / mdl),
+                             object_region={'mode': 'camera_focus_v1'},
                              experiment=experiment, **scaffold,
                              pipeline_start=pipeline_start,
                              resume=data.get("resume", True) is True,

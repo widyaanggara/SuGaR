@@ -157,7 +157,6 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                     '--gpu', gpu, '--resolution', external_resolution, '--experiment', experiment,
                     *initial_args, '--postprocess_only', '--radegs_profile', radegs_profile,
                     '--visual_protocol', visual_protocol, *image_args,
-                    *object_arguments(object_region),
                     *([] if resume else ['--no_resume'])]
             if method == 'radegs':
                 args.extend(['--mesh_backend', radegs_mesh_backend])
@@ -191,7 +190,7 @@ def main():
     parser.add_argument('--visual_protocol', choices=('shared', 'legacy'), default='shared')
     parser.add_argument('--sugar_mesh_export', choices=('obj', 'surface'), default='obj')
     parser.add_argument('--sugar_diagnostics', action='store_true')
-    parser.add_argument('--object_region_json')
+    parser.add_argument('--object_region_json', default='{"mode":"camera_focus_v1"}')
     add_resolution_arguments(parser, colmap=True)
     add_colmap_arguments(parser)
     args = parser.parse_args()

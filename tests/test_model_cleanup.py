@@ -109,6 +109,36 @@ class CleanupTests(unittest.TestCase):
                 delete_model_data(self.queue, self.data)
         self.assertTrue(photo.exists())
 
+    def test_all_results_preserves_colmap_inputs_bounds_scaffold_and_other_statues(self):
+        kept = [self.write('datasets/Dewa/model_01/' + name) for name in
+                ('input/a.jpg', 'images/a.jpg', 'raw_video/a.mp4', 'sparse/0/cameras.bin',
+                 'ground_truth/lidar.ply', 'object_region.json', 'colmap_settings.json')]
+        kept += [self.write('datasets/' + name + '.json') for name in
+                 ('model_names', 'geometry_scales', 'geometry_settings')]
+        kept.append(self.write('outputs/ablations/scaffold_anchor/scaffold/Dewa/model_01/anchor.ply'))
+        removed = []
+        for method, label in (('3dgs', '3DGS'), ('sugar', 'SuGaR'), ('2dgs', '2DGS'), ('radegs', 'RaDe-GS')):
+            for base in ('outputs', 'outputs/ablations/scaffold_anchor'):
+                removed.append(self.write(f'{base}/{method}/Dewa/model_01/result.ply'))
+                kept.append(self.write(f'{base}/{method}/Dewa/model_02/result.ply'))
+            removed.append(self.write(f'outputs/logs/training_logs/Dewa_model_01_{label}_run.json'))
+        kept.append(self.write('outputs/logs/training_logs/Dewa_model_01_COLMAP_run.json'))
+        kept.append(self.write('outputs/logs/training_logs/Dewa_model_01_Scaffold-GS_run.json'))
+        report = self.write('outputs/logs/evaluation_reports/summary_comparison.csv',
+            'Kelas,Model ID,Metode\nDewa,model_01,3DGS\nDewa,model_01,SuGaR\n'
+            'Dewa,model_01,2DGS_scaffold_anchor\nDewa,model_01,RaDe-GS\n'
+            'Dewa,model_01,COLMAP\nDewa,model_02,SuGaR\n')
+        ids, _ = self.queue.enqueue([dict(action=action, class_name='Dewa', model_id='model_01')
+                                    for action in ('full_pipeline', '3dgs', 'sugar', '2dgs', 'radegs', 'colmap')])
+        delete_model_data(self.queue, {**self.data, 'scope': 'results'})
+        self.assertTrue(all(not p.exists() for p in removed))
+        self.assertTrue(all(p.read_text() == 'data' for p in kept))
+        self.assertEqual([job['id'] for job in self.queue.jobs], [ids[-1]])
+        with report.open() as stream:
+            self.assertEqual([(r['Model ID'], r['Metode']) for r in csv.DictReader(stream)],
+                             [('model_01', 'COLMAP'), ('model_02', 'SuGaR')])
+        delete_model_data(self.queue, {**self.data, 'scope': 'results'})
+
 
 if __name__ == '__main__':
     unittest.main()

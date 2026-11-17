@@ -25,6 +25,9 @@ def object_status(output, region):
         source = Path(saved['identity']['source'])
         if not source.resolve().is_relative_to(output.resolve()):
             return 'stale'
+        if saved['identity'].get('camera_signature') is not None:
+            if saved['identity']['camera_signature'] != file_signature(Path(saved['identity']['cameras'])):
+                return 'stale'
         return 'ready' if (saved['identity']['region'] == region
             and saved['identity']['source_signature'] == file_signature(source)
             and saved['output_signature'] == file_signature(folder / 'object.ply')) else 'stale'
@@ -62,6 +65,10 @@ def export_object(root, cls, mdl, method, experiment, region, output_override=No
             colmap_signature(Path(root) / 'datasets' / cls / mdl)):
         raise ValueError('COLMAP berubah; simpan ulang batas patung sebelum mengekspor mesh objek.')
     output = Path(output_override) if output_override else output_base(root, experiment) / method / cls / mdl
+    automatic = region.get('mode') == 'camera_focus_v1'
+    camera_path = output_base(root, experiment) / '3dgs' / cls / mdl / 'cameras.json'
+    if automatic and method != 'sugar':
+        raise ValueError('Fokus otomatis hanya untuk mesh SuGaR.')
     if method == 'sugar':
         manifest = json.loads((output / 'pipeline_result.json').read_text(encoding='utf-8'))
         source = (output / (manifest.get('surface_mesh') or manifest['textured_mesh'])).resolve()
@@ -73,6 +80,9 @@ def export_object(root, cls, mdl, method, experiment, region, output_override=No
     target, receipt = folder / 'object.ply', folder / 'region.json'
     identity = {'version': 1, 'region': region, 'source': str(source),
                 'source_signature': file_signature(source)}
+    if automatic:
+        identity['cameras'] = str(camera_path)
+        identity['camera_signature'] = file_signature(camera_path)
     if target.is_file() and receipt.is_file():
         saved = json.loads(receipt.read_text(encoding='utf-8'))
         if saved.get('identity') == identity and saved.get('output_signature') == file_signature(target):
@@ -80,7 +90,12 @@ def export_object(root, cls, mdl, method, experiment, region, output_override=No
             return target
     import open3d as o3d
     mesh = o3d.io.read_triangle_mesh(str(source))
-    result = clean_mesh(mesh, region, o3d)
+    effective_region = region
+    if automatic:
+        from pipeline_tools.sugar_focus import camera_focus_region
+        effective_region = camera_focus_region(json.loads(camera_path.read_text(encoding='utf-8')))
+        print(f'[OBJECT] Fokus otomatis SuGaR: {effective_region}', flush=True)
+    result = clean_mesh(mesh, effective_region, o3d)
     folder.mkdir(parents=True, exist_ok=True)
     temporary = folder / 'object.tmp.ply'
     if not o3d.io.write_triangle_mesh(str(temporary), result):
@@ -89,6 +104,7 @@ def export_object(root, cls, mdl, method, experiment, region, output_override=No
         raise RuntimeError('Mesh patung hasil ekspor tidak terbaca.')
     temporary.replace(target)
     payload = {'identity': identity, 'output_signature': file_signature(target),
+               'effective_region': effective_region,
                'vertices': len(result.vertices), 'triangles': len(result.triangles),
                'note': 'Geometry-only PLY; original model, textures and evaluation unchanged.'}
     temporary = receipt.with_suffix('.tmp')

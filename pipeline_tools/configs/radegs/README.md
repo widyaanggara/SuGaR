@@ -45,3 +45,25 @@ cannot resume a checkpoint with a different recorded protocol.
 
 The profiles do not guarantee a 30-minute run. Verify throughput on the server,
 including after regularization activates at iteration 7000.
+
+## Dashboard mesh backend
+
+Dashboard RaDe-GS jobs and full pipelines default to `scalable`, including queued
+jobs without a saved backend setting. The batch runner passes `--mesh_backend
+scalable` only to RaDe-GS postprocessing. This selects `mesh_extract_tnt.py`
+(ScalableTSDFVolume), avoiding the VoxelBlockGrid extraction that crashed on the
+server. Training settings remain unchanged. Restart the dashboard after updating
+the code; already running subprocesses keep their original command.
+
+The dashboard API accepts `radegs_mesh_backend: native` for explicit comparisons;
+the batch CLI equivalent is `--radegs_mesh_backend native`. The standalone
+`run_external_method.py` retains its native default unless `--mesh_backend` is
+specified. Backend metadata and existing mesh backups are managed by that runner.
+Scalable meshes can differ from native meshes and require geometry evaluation.
+Success on one statue does not guarantee every dataset or environment will succeed.
+
+The scalable script runs through `pipeline_tools/radegs_mesh.py`, which preserves
+its camera/render/TSDF parameters and guards postprocessing when fewer than eight
+components exist. It rejects empty/tiny-only meshes and reads both output PLYs
+back to check vertices and triangles. Resume also checks that the mesh receipt
+refers to the current checkpoint before skipping completed work.

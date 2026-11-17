@@ -159,7 +159,8 @@ def run(args):
         script = repo / 'mesh_extract_tnt.py'
         if not script.is_file():
             raise FileNotFoundError(f'Backend ScalableTSDFVolume tidak tersedia: {script}')
-        stages = [(stage, [args.python, '-u', str(script), '-m', str(output),
+        stages = [(stage, [args.python, '-u', str(ROOT / 'pipeline_tools/radegs_mesh.py'),
+                   '--repo', str(repo), '-m', str(output),
                    '--iteration', '30000', '-r', '2', '--num_cluster', '8', '--depth_ratio', '0.5',
                    '--voxel_size', '0.009', '--max_depth', '8.0'] if stage == 'Ekstraksi_Mesh' else command)
                   for stage, command in stages]
@@ -184,7 +185,8 @@ def run(args):
     if (not mesh_only and not args.no_resume and not args.evaluate_only and skip_training and visual_metrics(output)
             and mesh_path(output, args.method).is_file() and previous_run.get('evaluated_checkpoint') == current_checkpoint
             and previous_run.get('evaluated_protocol') == protocol
-            and (args.method != 'radegs' or previous_run.get('mesh_backend', 'native') == mesh_backend)):
+            and (args.method != 'radegs' or (previous_run.get('mesh_backend', 'native') == mesh_backend
+                 and previous_run.get('mesh_checkpoint') == current_checkpoint))):
         print('[SKIP] Training, mesh, dan evaluasi metode sudah lengkap dan cocok.', flush=True)
         return
     for stage, command in stages:

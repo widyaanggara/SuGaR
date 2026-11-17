@@ -138,6 +138,8 @@ def build_command(job, root=PROJECT_ROOT):
                 '--visual_protocol', job.get('visual_protocol', 'legacy'), *image_args]
         if action == 'evaluate_visual':
             args.append('--evaluate_only')
+        if external_method == 'radegs':
+            args.extend(['--mesh_backend', job.get('radegs_mesh_backend', 'scalable')])
         if job.get('resume', True) is False:
             args.append('--no_resume')
         return args
@@ -150,6 +152,7 @@ def build_command(job, root=PROJECT_ROOT):
                          '--python_radegs', job.get('python_radegs') or sys.executable,
                          '--external_resolution', str(job.get('external_resolution', 1)),
                          '--radegs_profile', job.get('radegs_profile', 'legacy'),
+                         '--radegs_mesh_backend', job.get('radegs_mesh_backend', 'scalable'),
                          '--visual_protocol', job.get('visual_protocol', 'legacy')])
         if not job.get("resume", True):
             args.append("--no_resume")
@@ -269,6 +272,9 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     radegs_profile = data.get('radegs_profile', 'yaml')
     if radegs_profile not in ('yaml', 'legacy'):
         raise ValueError('Profil RaDe-GS harus yaml atau legacy.')
+    radegs_mesh_backend = data.get('radegs_mesh_backend', 'scalable')
+    if radegs_mesh_backend not in ('native', 'scalable'):
+        raise ValueError('Backend mesh RaDe-GS harus native atau scalable.')
     include_external = data.get('include_external', True)
     if not isinstance(include_external, bool):
         raise ValueError('Pilihan pipeline empat metode harus boolean.')
@@ -348,6 +354,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                              include_external=include_external, python_2dgs=python_2dgs, python_radegs=python_radegs,
                              external_python=external_python, external_resolution=external_resolution,
                              radegs_profile=radegs_profile, visual_protocol='shared',
+                             radegs_mesh_backend=radegs_mesh_backend,
                              experiment=experiment, **scaffold,
                              pipeline_start=pipeline_start,
                              resume=data.get("resume", True) is True,

@@ -51,6 +51,22 @@ class ExternalMethodTests(unittest.TestCase):
         self.assertEqual(stages['Training'][stages['Training'].index('-r') + 1], '-1')
         self.assertEqual(stages['Ekstraksi_Mesh'][stages['Ekstraksi_Mesh'].index('-r') + 1], '2')
 
+    def test_dashboard_mesh_backend_defaults_and_old_queue_fallback(self):
+        for action, flag in (('radegs', '--mesh_backend'), ('full_pipeline', '--radegs_mesh_backend')):
+            jobs, _ = prepare_jobs(dict(action=action, class_name='Penabuh', model_id='model_01'), self.root)
+            self.assertEqual(jobs[0]['radegs_mesh_backend'], 'scalable')
+            for backend in ('scalable', 'native', None):
+                job = dict(jobs[0])
+                if backend is None:
+                    del job['radegs_mesh_backend']
+                else:
+                    job['radegs_mesh_backend'] = backend
+                command = build_command(job, self.root)
+                self.assertEqual(command[command.index(flag) + 1], backend or 'scalable')
+        with self.assertRaisesRegex(ValueError, 'Backend mesh'):
+            prepare_jobs(dict(action='radegs', class_name='Penabuh', model_id='model_01',
+                              radegs_mesh_backend='invalid'), self.root)
+
     def test_new_jobs_default_to_auto_but_existing_jobs_keep_resolution(self):
         for action in ('radegs', 'full_pipeline'):
             jobs, _ = prepare_jobs(dict(action=action, class_name='Penabuh', model_id='model_01',
@@ -167,7 +183,8 @@ class ExternalMethodTests(unittest.TestCase):
             runner.run(args)
         popen.assert_called_once()
         command = popen.call_args.args[0]
-        self.assertTrue(command[2].endswith('mesh_extract_tnt.py'))
+        self.assertTrue(command[2].endswith('radegs_mesh.py'))
+        self.assertEqual(command[command.index('--repo') + 1], str(self.root / 'external/RaDe-GS'))
         self.assertEqual(command[command.index('--iteration') + 1], '30000')
         self.assertEqual(popen.call_args.kwargs['env']['PYTHONFAULTHANDLER'], '1')
         saved = json.loads((output / 'togoglab_run.json').read_text())
@@ -222,6 +239,10 @@ class ExternalMethodTests(unittest.TestCase):
                 self.assertEqual(args[args.index('--experiment') + 1], experiment)
                 self.assertIn('--train_only' if index < 4 else '--postprocess_only', args)
                 self.assertEqual('--initial_ply' in args, experiment == 'scaffold_anchor')
+                if index == 7:
+                    self.assertEqual(args[args.index('--mesh_backend') + 1], 'scalable')
+                else:
+                    self.assertNotIn('--mesh_backend', args)
 
     def test_full_pipeline_failure_does_not_claim_all_methods_completed(self):
         def fail_external(script, args, root):

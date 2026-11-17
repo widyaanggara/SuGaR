@@ -107,6 +107,75 @@ class ExternalMethodTests(unittest.TestCase):
         self.assertTrue(status['external_methods']['radegs']['evaluated'])
         self.assertEqual({r['Metode'] for r in get_metrics_table(self.root)}, {'2DGS', 'RaDe-GS'})
 
+    def test_shared_training_uses_launcher_and_records_protocol(self):
+        output = self.root / 'outputs/2dgs/Penabuh/model_01'
+        args = argparse.Namespace(statue_class='Penabuh', model_id='model_01', method='2dgs',
+            gpu=0, python=sys.executable, evaluate_only=False, train_only=True, no_resume=False,
+            resolution=-1, visual_protocol='shared', image_downscale=1, image_max_size=1600)
+        process = MagicMock()
+        process.poll.return_value = 0
+        def finish():
+            self.write(checkpoint(output))
+            self.write(output / 'cfg_args')
+            return 0
+        process.wait.side_effect = finish
+        with patch.object(runner, 'ROOT', self.root), patch.object(runner, 'ThesisLogger'), \
+             patch.object(runner.subprocess, 'run'), patch.object(runner.subprocess, 'Popen', return_value=process) as popen:
+            runner.run(args)
+            command = popen.call_args.args[0]
+            self.assertTrue(command[2].endswith('external_visual_launcher.py'))
+            self.assertIn('train.py', command)
+            self.assertEqual(command[command.index('--image_max_size') + 1], '1600')
+            receipt = json.loads((output / 'togoglab_run.json').read_text())
+            self.assertEqual(receipt['identity']['visual_protocol']['resize'], 'longest_side_no_upscale')
+            args.image_max_size = 1920
+            popen.reset_mock()
+            with self.assertRaisesRegex(ValueError, 'Konfigurasi/dataset berubah'):
+                runner.run(args)
+            popen.assert_not_called()
+
+    def test_failed_child_reports_signal_instead_of_generic_failure(self):
+        args = argparse.Namespace(statue_class='Penabuh', model_id='model_01', method='radegs',
+            gpu=0, python=sys.executable, evaluate_only=False, train_only=True, no_resume=False, resolution=1)
+        process = MagicMock()
+        process.wait.return_value = -9
+        process.poll.return_value = -9
+        with patch.object(runner, 'ROOT', self.root), patch.object(runner, 'ThesisLogger'), \
+             patch.object(runner.subprocess, 'run'), patch.object(runner.subprocess, 'Popen', return_value=process):
+            with self.assertRaisesRegex(RuntimeError, 'signal 9'):
+                runner.run(args)
+
+    def test_mesh_only_scalable_preserves_training_and_skips_other_stages(self):
+        output = self.root / 'outputs/radegs/Penabuh/model_01'
+        self.write(checkpoint(output), 'trained model')
+        self.write(output / 'cfg_args')
+        self.write(self.root / 'external/RaDe-GS/mesh_extract_tnt.py')
+        old = {'identity': {'old_training': True}, 'evaluated_protocol': {'old': True}}
+        self.write(output / 'togoglab_run.json', json.dumps(old))
+        self.write(output / 'recon_post.ply', 'previous mesh')
+        args = argparse.Namespace(statue_class='Penabuh', model_id='model_01', method='radegs',
+            gpu=0, python=sys.executable, evaluate_only=False, train_only=False, no_resume=False,
+            resolution=1, mesh_only=True, mesh_backend='scalable')
+        process = MagicMock()
+        def finish_mesh():
+            self.write(output / 'recon_post.ply', 'new scalable mesh output')
+            return 0
+        process.wait.side_effect = finish_mesh
+        process.poll.return_value = 0
+        with patch.object(runner, 'ROOT', self.root), patch.object(runner, 'ThesisLogger'), \
+             patch.object(runner.subprocess, 'run'), patch.object(runner.subprocess, 'Popen', return_value=process) as popen:
+            runner.run(args)
+        popen.assert_called_once()
+        command = popen.call_args.args[0]
+        self.assertTrue(command[2].endswith('mesh_extract_tnt.py'))
+        self.assertEqual(command[command.index('--iteration') + 1], '30000')
+        self.assertEqual(popen.call_args.kwargs['env']['PYTHONFAULTHANDLER'], '1')
+        saved = json.loads((output / 'togoglab_run.json').read_text())
+        self.assertEqual(saved['identity'], old['identity'])
+        self.assertEqual(saved['evaluated_protocol'], old['evaluated_protocol'])
+        self.assertEqual(saved['mesh_backend'], 'scalable')
+        self.assertEqual(next((output / 'mesh_backups').glob('*/recon_post.ply')).read_text(), 'previous mesh')
+
     def test_runner_skips_training_and_rejects_swallowed_metric_failure(self):
         output = self.root / 'outputs/2dgs/Penabuh/model_01'
         self.write(checkpoint(output))

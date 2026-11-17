@@ -11,6 +11,7 @@ from pipeline_tools.dataset_registry import has_checkpoint, has_sugar_result, sc
 from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.logger_utils import ThesisLogger
 from pipeline_tools.run_settings import add_resolution_arguments, resolution_settings, read_training_config, training_matches
+from pipeline_tools.visual_protocol import quantize, specification
 
 
 def training_background(output):
@@ -48,7 +49,8 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
     if not has_checkpoint(baseline, iteration):
         raise FileNotFoundError(f'Checkpoint 3DGS {iteration} belum lengkap.')
     white = training_background(baseline)
-    if not training_matches(baseline, scene, image_downscale, image_max_size, white,
+    recorded_training = json.loads((baseline / 'training_settings.json').read_text(encoding='utf-8'))
+    if not training_matches(baseline, scene, recorded_training['image_downscale'], recorded_training['image_max_size'], white,
                             use_recorded_initialization=True):
         raise ValueError('Konfigurasi evaluasi berbeda dari training baseline: resolusi, split, atau model COLMAP berubah.')
     manifest = None
@@ -58,8 +60,6 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
         manifest = json.loads((output / 'pipeline_result.json').read_text(encoding='utf-8'))
         if manifest['white_background'] != white:
             raise ValueError('Background SuGaR dan baseline berbeda; latih dengan konfigurasi yang sama.')
-        if manifest.get('image_downscale') != image_downscale or manifest.get('image_max_size') != image_max_size:
-            raise ValueError('Resolusi evaluasi berbeda dari training SuGaR; gunakan konfigurasi training yang sama.')
     wrapper = GaussianSplattingWrapper(source_path=str(scene), output_path=str(baseline),
         iteration_to_load=iteration, load_gt_images=True, eval_split=True, eval_split_interval=8,
         white_background=white)
@@ -101,6 +101,7 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
             prediction = prediction.clamp(0, 1).permute(2, 0, 1).unsqueeze(0)
             if prediction.shape != gt.shape:
                 raise ValueError('Ukuran rendering dan ground truth berbeda.')
+            prediction, gt = quantize(prediction), quantize(gt)
             row = {'image': camera.image_name, 'psnr': float(psnr(prediction, gt).mean()),
                    'ssim': float(ssim(prediction, gt)),
                    'lpips': float(criterion(prediction * 2 - 1, gt * 2 - 1).mean())}
@@ -120,6 +121,9 @@ def evaluate_rendering(cls, mdl, method, gpu, logger, image_downscale=1, image_m
                   'point_cloud/iteration_30000/point_cloud.ply')
     checkpoint_path = output / manifest['refined_checkpoint'] if manifest else baseline / report['checkpoint']
     report['checkpoint_signature'] = file_signature(checkpoint_path)
+    report['visual_protocol'] = specification(image_downscale, image_max_size)
+    report['training_image_settings'] = {key: (manifest or recorded_training).get(key)
+                                       for key in ('image_downscale', 'image_max_size')}
     temp = result_path.with_suffix('.tmp')
     temp.write_text(json.dumps(report, indent=2, allow_nan=False), encoding='utf-8')
     temp.replace(result_path)

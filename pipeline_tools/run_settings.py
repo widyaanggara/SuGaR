@@ -159,8 +159,10 @@ def training_matches(output, scene, downscale, max_size, white_background=False,
 
 
 def evaluation_matches(output, downscale, max_size):
+    from pipeline_tools.visual_protocol import specification
     try:
         settings = json.loads((Path(output) / 'evaluation/metrics.json').read_text(encoding='utf-8'))
-        return settings['image_downscale'] == downscale and settings['image_max_size'] == max_size
+        return (settings['image_downscale'] == downscale and settings['image_max_size'] == max_size
+                and settings.get('visual_protocol') == specification(downscale, max_size))
     except (OSError, ValueError, KeyError, TypeError):
         return False

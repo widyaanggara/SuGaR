@@ -19,6 +19,7 @@ from sugar_utils.artifact_paths import refined_assets
 from web_dashboard.job_queue import JobQueue
 from web_dashboard.server import DashboardHandler, build_command, get_project_status, prepare_jobs
 from pipeline_tools.run_settings import colmap_signature
+from pipeline_tools.visual_protocol import specification
 
 
 def write(path, text='data'):
@@ -402,6 +403,7 @@ class RunnerTests(unittest.TestCase):
                     output = baseline if method == '3DGS' else sugar
                     checkpoint = 'point_cloud/iteration_30000/point_cloud.ply' if method == '3DGS' else 'refined/test/2000.pt'
                     write(output / 'evaluation/metrics.json', json.dumps(dict(psnr=20, ssim=.8, lpips=.2,
+                        visual_protocol=specification(),
                         image_downscale=1, image_max_size=1600,
                         checkpoint=checkpoint, checkpoint_signature=file_signature(output / checkpoint), per_view=[{}])))
             with patch.object(batch, 'run_stage', side_effect=fake_stage):

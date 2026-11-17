@@ -102,6 +102,10 @@ class ResolutionTests(unittest.TestCase):
             write(scene / 'colmap_settings.json', '{invalid')
             self.assertFalse(colmap_matches(scene, 3200))
             write(output / 'evaluation/metrics.json', json.dumps(dict(image_downscale=2, image_max_size=1280)))
+            self.assertFalse(evaluation_matches(output, 2, 1280))  # Old metric protocol must be recomputed.
+            from pipeline_tools.visual_protocol import specification
+            write(output / 'evaluation/metrics.json', json.dumps(dict(image_downscale=2, image_max_size=1280,
+                                                                    visual_protocol=specification(2, 1280))))
             self.assertTrue(evaluation_matches(output, 2, 1280))
             self.assertFalse(evaluation_matches(output, 2, 1600))
 

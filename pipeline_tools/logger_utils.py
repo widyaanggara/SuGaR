@@ -148,6 +148,22 @@ class ThesisLogger:
             self.data["peak_vram_gb"] = round(used_gb, 3)
             self.log(f"Puncak Penggunaan VRAM GPU: {used_gb:.2f} GB")
 
+    def record_child_vram(self, path, pid):
+        """Prefer the child's allocator peak, matching SuGaR's metric definition."""
+        try:
+            report = json.loads(Path(path).read_text(encoding='utf-8'))
+            allocated, reserved = report['peak_allocated_bytes'], report['peak_reserved_bytes']
+            if (report['pid'] != pid or report['measurement'] != 'torch_peak_allocated'
+                    or any(type(value) is not int or value < 0 for value in (allocated, reserved))):
+                raise ValueError('Invalid child VRAM report')
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+        self.data['peak_vram_gb'] = round(allocated / 1024**3, 3)
+        self.data['peak_reserved_vram_gb'] = round(reserved / 1024**3, 3)
+        self.data['vram_measurement'] = 'torch_peak_allocated'
+        self.data['vram_report'] = str(path)
+        return True
+
     def start_vram_monitor(self, pid: Optional[int] = None, interval_seconds: float = 1.0):
         """Sample this process (or a child training process) with nvidia-smi."""
         self.stop_vram_monitor()
@@ -255,7 +271,8 @@ class ThesisLogger:
         self.log(f"SESI SELESAI: {self.session_name}")
         self.log(f"Status: {self.data['status']}")
         self.log(f"Total Waktu Komputasi: {self.data['total_duration_minutes']} menit")
-        self.log(f"Puncak VRAM: {self.data['peak_vram_gb']} GB")
+        peak_display = self.data['peak_vram_gb'] if self.data['vram_measurement'] != 'unavailable' else 'tidak terukur'
+        self.log(f"Puncak VRAM: {peak_display} GB")
         self.log(f"==================================================")
 
         # 1. Simpan JSON terstruktur

@@ -134,7 +134,8 @@ def build_command(job, root=PROJECT_ROOT):
         args = [sys.executable, '-u', str(root / 'pipeline_tools/run_external_method.py'),
                 '--method', external_method, *common, *gpu, '--python', job.get('external_python') or sys.executable,
                 '--resolution', str(job.get('external_resolution', 1)),
-                '--radegs_profile', job.get('radegs_profile', 'legacy')]
+                '--radegs_profile', job.get('radegs_profile', 'legacy'),
+                '--visual_protocol', job.get('visual_protocol', 'legacy'), *image_args]
         if action == 'evaluate_visual':
             args.append('--evaluate_only')
         if job.get('resume', True) is False:
@@ -148,7 +149,8 @@ def build_command(job, root=PROJECT_ROOT):
             args.extend(['--include_external', '--python_2dgs', job.get('python_2dgs') or sys.executable,
                          '--python_radegs', job.get('python_radegs') or sys.executable,
                          '--external_resolution', str(job.get('external_resolution', 1)),
-                         '--radegs_profile', job.get('radegs_profile', 'legacy')])
+                         '--radegs_profile', job.get('radegs_profile', 'legacy'),
+                         '--visual_protocol', job.get('visual_protocol', 'legacy')])
         if not job.get("resume", True):
             args.append("--no_resume")
         if job.get('pipeline_start') == 'existing_colmap':
@@ -345,7 +347,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
             jobs.append(dict(action=action, class_name=cls, model_id=mdl, gpu=gpu,
                              include_external=include_external, python_2dgs=python_2dgs, python_radegs=python_radegs,
                              external_python=external_python, external_resolution=external_resolution,
-                             radegs_profile=radegs_profile,
+                             radegs_profile=radegs_profile, visual_protocol='shared',
                              experiment=experiment, **scaffold,
                              pipeline_start=pipeline_start,
                              resume=data.get("resume", True) is True,

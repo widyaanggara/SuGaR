@@ -144,6 +144,16 @@ class ExternalMethodTests(unittest.TestCase):
             self.assertEqual(command[command.index('--image_max_size') + 1], '1600')
             receipt = json.loads((output / 'togoglab_run.json').read_text())
             self.assertEqual(receipt['identity']['visual_protocol']['resize'], 'longest_side_no_upscale')
+            # A completed shared-protocol run remains reusable when only the
+            # overridden native -r changes (the reported server failure).
+            args.resolution = 1
+            popen.reset_mock()
+            runner.run(args)
+            popen.assert_not_called()
+            # A failed startup receipt without a checkpoint can also retry.
+            checkpoint(output).unlink()
+            runner.run(args)
+            popen.assert_called_once()
             args.image_max_size = 1920
             popen.reset_mock()
             with self.assertRaisesRegex(ValueError, 'Konfigurasi/dataset berubah'):

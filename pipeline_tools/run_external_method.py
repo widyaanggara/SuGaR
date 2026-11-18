@@ -60,6 +60,21 @@ def staged_anchor_scene(scene, output, initial_ply):
     return target
 
 
+def training_identities_match(previous, current):
+    """Compare effective settings; shared camera sizing overrides native -r.
+
+    Preserve all other checks, including dataset, protocol, initialization and
+    YAML settings. Existing receipts need no migration or checkpoint deletion.
+    """
+    if not isinstance(previous, dict):
+        return False
+    previous, current = dict(previous), dict(current)
+    if previous.get('visual_protocol') and current.get('visual_protocol'):
+        previous.pop('resolution', None)
+        current.pop('resolution', None)
+    return previous == current
+
+
 def run(args):
     mesh_only = getattr(args, 'mesh_only', False)
     mesh_backend = getattr(args, 'mesh_backend', 'native')
@@ -124,7 +139,7 @@ def run(args):
         identity['visual_protocol'] = protocol
         print(f'[PROTOCOL] {protocol}; overrides native/YAML image sizing for training and rendering.', flush=True)
     previous_run = json.loads(receipt.read_text()) if receipt.is_file() else {}
-    matches = previous_run.get('identity') == identity
+    matches = training_identities_match(previous_run.get('identity'), identity)
     if previous_run and not matches and not args.no_resume and not args.evaluate_only and not mesh_only:
         raise ValueError('Konfigurasi/dataset berubah. Nonaktifkan Lewati tahap yang selesai untuk training ulang.')
     postprocess_only = getattr(args, 'postprocess_only', False) or mesh_only

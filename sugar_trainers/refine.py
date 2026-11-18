@@ -894,11 +894,12 @@ def refined_training(args):
     CONSOLE.print(f"Training finished after {num_iterations} iterations with loss={loss.detach().item()}.")
     CONSOLE.print("Saving final model...")
     model_path = os.path.join(sugar_checkpoint_path, f'{iteration}.pt')
+    # The final model is only loaded for rendering/export; its Adam state (2x the model size)
+    # is never read. Resuming uses the recovery checkpoints, not this file.
     sugar.save_model(path=model_path,
                     train_losses=train_losses,
                     epoch=epoch,
                     iteration=iteration,
-                    optimizer_state_dict=optimizer.state_dict(),
                     )
 
     CONSOLE.print("Final model saved.")

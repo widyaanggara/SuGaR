@@ -295,12 +295,12 @@ function initializeSettings() {
   // or an older version of the recommendation. Only the four SuGaR values change; resolution,
   // COLMAP and GPU settings stay as saved. A later manual choice is respected.
   try {
-    if (presets.statue_quality && !window.localStorage?.getItem('sugar-preset-statue-quality-v2')) {
+    if (presets.statue_quality && !window.localStorage?.getItem('sugar-preset-statue-quality-v3')) {
       if (['official_high', 'statue_quality'].includes($('settingsPreset').value)) {
         for (const [key, value] of Object.entries(presets.statue_quality.values)) $(sugarControlIds[key]).value = String(value);
         $('settingsPreset').value = 'statue_quality';
       }
-      window.localStorage?.setItem('sugar-preset-statue-quality-v2', '1');
+      window.localStorage?.setItem('sugar-preset-statue-quality-v3', '1');
     }
   } catch (_) { /* Browser storage may be blocked; defaults still apply. */ }
   if (!presets[$('settingsPreset').value]) $('settingsPreset').value = 'custom';

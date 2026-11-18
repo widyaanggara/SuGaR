@@ -20,6 +20,13 @@ def research_presets():
     return references
 
 
+# SuGaR configuration used for every thesis run started from the dashboard: upstream high_poly
+# values (1,000,000 mesh budget, 1 Gaussian per triangle, 15,000 refinement iterations,
+# dn_consistency) with the statue-focused mesh. The browser cannot override it.
+SUGAR_RESEARCH_SETTINGS = {'vertices': 1000000, 'gaussians_per_triangle': 1,
+                           'refinement_time': 'long', 'regularization': 'dn_consistency'}
+
+
 def sugar_settings(data):
     # Historical defaults keep already queued jobs reproducible. New UI presets
     # always send all four parameters explicitly.

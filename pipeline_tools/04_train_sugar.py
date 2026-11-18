@@ -409,6 +409,10 @@ def train_sugar_pipeline(scene_path: str,
     temporary = manifest_path.with_suffix('.tmp')
     temporary.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     temporary.replace(manifest_path)
+    # Resume slots (full model + optimizer, two per stage) are only needed while a run can
+    # still be interrupted. Once the result is complete they are several GB of dead weight.
+    import shutil
+    shutil.rmtree(output_dir / 'recovery/checkpoints', ignore_errors=True)
 
     if logger:
         logger.log("Seluruh tahapan SuGaR berhasil diselesaikan!")

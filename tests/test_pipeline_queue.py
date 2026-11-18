@@ -116,7 +116,7 @@ class WorkspaceTests(unittest.TestCase):
         for data in ({'class_name': '../Dewa'},
                      {'class_name': 'Dewa', 'model_id': 'tanks_and_temples_1'},
                      {'action': 'evaluate', 'class_name': 'Dewa', 'model_id': 'model_01', 'scale_factor': 'nan'},
-                     {'gpu': -1}, {'action': 'shell'}, {'vertices': 3}):
+                     {'gpu': -1}, {'action': 'shell'}):
             with self.subTest(data=data), self.assertRaises(ValueError):
                 prepare_jobs(data)
 

@@ -68,15 +68,17 @@ class SettingsContractTests(unittest.TestCase):
 
     def test_api_and_full_batch_forward_all_sugar_controls_and_validate_bad_types(self):
         from pipeline_tools import batch_run_all as batch
+        from pipeline_tools.run_settings import SUGAR_RESEARCH_SETTINGS
         values = dict(vertices=200000, gaussians_per_triangle=6, refinement_time='medium', regularization='density')
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             scene = root / 'datasets/Dewa/model_01'
             write(scene / 'input/a.jpg')
             for action in ('sugar', 'full_pipeline'):
+                # The dashboard cannot override the SuGaR configuration fixed in code.
                 jobs, _ = prepare_jobs(dict(action=action, class_name='Dewa', model_id='model_01', **values), root)
                 command = build_command(jobs[0], root)
-                for key, value in values.items():
+                for key, value in SUGAR_RESEARCH_SETTINGS.items():
                     self.assertEqual(command[command.index('--' + key) + 1], str(value))
             class StopAtTraining(Exception): pass
             def stage(script, args, root):

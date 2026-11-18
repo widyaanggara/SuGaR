@@ -370,6 +370,13 @@ def prepare_jobs(data, root=PROJECT_ROOT):
         if action == 'full_pipeline' and pipeline_start == 'existing_colmap' and not has_colmap_model(Path(root) / 'datasets' / cls / mdl):
             skipped.append(f'{cls}/{mdl}: images/ hasil undistorsi dan sparse/0 COLMAP belum lengkap')
             continue
+        if action == 'full_pipeline' and data.get('resume', True) is True:
+            from pipeline_tools.batch_run_all import pipeline_complete
+            if pipeline_complete(root, cls, mdl, settings['image_downscale'], settings['image_max_size'],
+                                 sugar_settings(data), mesh_export, skip_sugar=skip_sugar,
+                                 include_external=include_external, experiment=experiment):
+                skipped.append(f'{cls}/{mdl}: sudah selesai dengan pengaturan yang sama')
+                continue
         scale = explicit_scale if explicit_scale is not None else scales.get(cls, {}).get(mdl)
         options = None if explicit_scale is not None else geometry_settings.get(cls, {}).get(mdl)
         if options and options['alignment_mode'] == 'manual':
@@ -508,7 +515,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json(result)
             elif path == "/api/run":
                 jobs, skipped = prepare_jobs(data, self.root)
-                if not jobs and data.get('action', 'full_pipeline') == 'full_pipeline':
+                finished = [reason for reason in skipped if reason.endswith('sudah selesai dengan pengaturan yang sama')]
+                if not jobs and data.get('action', 'full_pipeline') == 'full_pipeline' and not finished:
                     if data.get('pipeline_start') == 'existing_colmap':
                         raise ValueError('Belum ada target dengan hasil COLMAP lengkap. Siapkan images/ dan sparse/0 pada model yang dipilih.')
                     raise ValueError("Belum ada foto/video pada dataset yang dipilih. Isi input/ atau raw_video/ terlebih dahulu.")

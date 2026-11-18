@@ -291,6 +291,18 @@ function initializeSettings() {
       }
     }
   } catch (_) { /* Ignore corrupt/blocked browser storage. */ }
+  // One-time switch to the current statue-focus recommendation, from the old default (high_poly)
+  // or an older version of the recommendation. Only the four SuGaR values change; resolution,
+  // COLMAP and GPU settings stay as saved. A later manual choice is respected.
+  try {
+    if (presets.statue_quality && !window.localStorage?.getItem('sugar-preset-statue-quality-v2')) {
+      if (['official_high', 'statue_quality'].includes($('settingsPreset').value)) {
+        for (const [key, value] of Object.entries(presets.statue_quality.values)) $(sugarControlIds[key]).value = String(value);
+        $('settingsPreset').value = 'statue_quality';
+      }
+      window.localStorage?.setItem('sugar-preset-statue-quality-v2', '1');
+    }
+  } catch (_) { /* Browser storage may be blocked; defaults still apply. */ }
   if (!presets[$('settingsPreset').value]) $('settingsPreset').value = 'custom';
   else {
     const values = presets[$('settingsPreset').value].values;
@@ -298,17 +310,6 @@ function initializeSettings() {
       $('settingsPreset').value = 'custom';
     }
   }
-  // One-time switch from the old default (high_poly) to the statue-focus recommendation.
-  // Only the four SuGaR values change; resolution, COLMAP and GPU settings stay as saved.
-  try {
-    if (presets.statue_quality && !window.localStorage?.getItem('sugar-preset-statue-quality-v1')) {
-      if ($('settingsPreset').value === 'official_high') {
-        for (const [key, value] of Object.entries(presets.statue_quality.values)) $(sugarControlIds[key]).value = String(value);
-        $('settingsPreset').value = 'statue_quality';
-      }
-      window.localStorage?.setItem('sugar-preset-statue-quality-v1', '1');
-    }
-  } catch (_) { /* Browser storage may be blocked; defaults still apply. */ }
   for (const id of settingControls) {
     const changed = () => updateSettings(Object.values(sugarControlIds).includes(id));
     $(id).oninput = changed;

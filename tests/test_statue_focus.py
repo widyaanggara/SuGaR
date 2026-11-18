@@ -63,6 +63,26 @@ class StatueFocusTests(unittest.TestCase):
         self.assertGreater(region_contains(region, self.parts['statue']).mean(), 0.95)
         self.assertLess(region_contains(region, self.parts['neighbor']).mean(), 0.02)
 
+    def test_ground_is_found_when_up_is_given_with_the_wrong_sign(self):
+        region = extract_statue(self.points, -self.up, self.center, self.box_min, self.box_max)
+        self.assertTrue(region['summary']['ground_found'])
+        self.assertGreater(region_contains(region, self.parts['statue']).mean(), 0.95)
+        self.assertLess(region_contains(region, self.parts['ground']).mean(), 0.02)
+
+    def test_camera_up_handles_portrait_photos_on_an_orbit(self):
+        up = np.array([0., 0., 1.])
+        rotations = []
+        for angle in np.linspace(0, 2 * np.pi, 24, endpoint=False):
+            look = np.array([-np.cos(angle), -np.sin(angle), -0.3])
+            look /= np.linalg.norm(look)
+            right = np.cross(look, up)
+            right /= np.linalg.norm(right)
+            down = np.cross(look, right)
+            # Phone turned 90 degrees: image x points down the world, image y points sideways.
+            rotations.append(np.stack([down, -right, look], axis=1))
+        estimate = camera_up(np.stack(rotations))
+        self.assertGreater(abs(estimate @ up), 0.95)
+
     def test_camera_up_uses_negative_camera_y(self):
         rotations = np.stack([rotation_to(np.array([0., 0., 1.]))[:, [0, 2, 1]] * [1, -1, 1]] * 3)
         np.testing.assert_allclose(camera_up(rotations), -rotations[0][:, 1])

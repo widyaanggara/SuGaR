@@ -36,22 +36,38 @@ def statue_focus_options(checkpoint_3dgs, n_vertices):
                 up=camera_up([camera['rotation'] for camera in cameras]).tolist())
 
 
-def previous_coarse(output_dir, checkpoint_3dgs, settings):
+def previous_coarse(output_dir, checkpoint_3dgs, settings, scene=None):
     """A finished coarse model from an earlier run of the same scene/settings.
 
-    Coarse optimization does not depend on mesh extraction, so switching the mesh to statue focus
-    only reruns mesh extraction and refinement.
+    Coarse optimization does not depend on mesh extraction, so changing only the mesh settings
+    reruns mesh extraction and refinement. Looks at the last finished result and, when a run
+    was interrupted (no result file yet), at the completed coarse stages it recorded.
     """
+    output_dir = Path(output_dir).resolve()
+    baseline = file_signature(Path(checkpoint_3dgs) / 'point_cloud/iteration_7000/point_cloud.ply')
     try:
         previous = json.loads((output_dir / 'pipeline_result.json').read_text(encoding='utf-8'))
         candidate = (output_dir / previous['coarse_checkpoint']).resolve()
-        baseline = file_signature(Path(checkpoint_3dgs) / 'point_cloud/iteration_7000/point_cloud.ply')
-        if (candidate.is_relative_to(output_dir.resolve()) and candidate.is_file() and candidate.stat().st_size
+        if (candidate.is_relative_to(output_dir) and candidate.is_file() and candidate.stat().st_size
                 and previous.get('baseline_signature') == baseline
                 and all(previous.get(key) == value for key, value in settings.items())):
             return str(candidate)
     except (OSError, ValueError, KeyError, TypeError):
         pass
+    records = sorted((output_dir / 'recovery/stages').glob('*/coarse.json'),
+                     key=lambda path: path.stat().st_mtime, reverse=True)
+    for record_path in records:
+        try:
+            record = json.loads(record_path.read_text(encoding='utf-8'))
+            context = record['identity']['context']
+            candidate = Path(record['output']).resolve()
+            if (context.get('baseline') == baseline and (scene is None or context.get('scene') == scene)
+                    and all(context.get(key) == value for key, value in settings.items())
+                    and candidate.is_relative_to(output_dir) and candidate.is_file()
+                    and file_signature(candidate) == record['signature']):
+                return str(candidate)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
     return None
 
 
@@ -127,7 +143,8 @@ def train_sugar_pipeline(scene_path: str,
         if quality_options and reuse_coarse is None and resume:
             reuse_coarse = previous_coarse(output_dir, checkpoint_3dgs, dict(
                 regularization=regularization_type, image_downscale=image_downscale,
-                image_max_size=image_max_size, white_background=white_background))
+                image_max_size=image_max_size, white_background=white_background),
+                scene=scene_identity(scene_path))
     if manifest_path.exists():
         manifest_path.unlink()
     coarse_dir = output_dir / "coarse"

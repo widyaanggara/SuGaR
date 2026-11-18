@@ -72,6 +72,25 @@ class WorkspaceTests(unittest.TestCase):
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                     prepare_jobs(invalid, root)
 
+    def test_queue_all_skips_models_already_finished_with_the_same_settings(self):
+        from pipeline_tools.batch_run_all import pipeline_complete
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for model in ('model_01', 'model_02'):
+                write(root / 'datasets/Dewa' / model / 'input/a.jpg')
+            self.assertFalse(pipeline_complete(root, 'Dewa', 'model_01', 1, 1600,
+                                               dict(vertices=1000000, gaussians_per_triangle=3,
+                                                    refinement_time='long', regularization='dn_consistency')))
+            done = lambda root, cls, mdl, *args, **kwargs: mdl == 'model_01'
+            with patch('pipeline_tools.batch_run_all.pipeline_complete', side_effect=done) as check:
+                jobs, skipped = prepare_jobs(dict(action='full_pipeline', class_name='Dewa'), root)
+                self.assertEqual([job['model_id'] for job in jobs], ['model_02'])
+                self.assertIn('Dewa/model_01: sudah selesai dengan pengaturan yang sama', skipped)
+                self.assertTrue(check.call_args.kwargs['include_external'])
+                # Turning off 'skip finished stages' means the user wants a fresh run.
+                fresh, _ = prepare_jobs(dict(action='full_pipeline', class_name='Dewa', resume=False), root)
+                self.assertEqual(len(fresh), 2)
+
     def test_18_slots_idempotent_and_markers_are_not_photos(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

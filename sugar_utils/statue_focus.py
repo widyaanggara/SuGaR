@@ -21,11 +21,18 @@ def _unit(vector):
 
 
 def camera_up(rotations):
-    """World up from camera-to-world rotations (COLMAP axes: camera y points down)."""
+    """World up axis from camera-to-world rotations (COLMAP axes: camera y points down).
+
+    Landscape photos: up = -mean(camera y). Portrait photos (phone turned 90 degrees): camera y
+    is horizontal and averages out around an orbit, while camera x is the consistent vertical
+    axis. The axis with the more consistent mean is used. For portrait photos the sign is not
+    known here; extract_statue tries both signs and keeps the one with real ground below.
+    """
     rotations = np.asarray(rotations, dtype=float)
     if rotations.ndim != 3 or rotations.shape[1:] != (3, 3):
         raise ValueError('Rotasi kamera tidak valid.')
-    return _unit(-rotations[:, :, 1].mean(axis=0))
+    landscape, portrait = -rotations[:, :, 1].mean(axis=0), rotations[:, :, 0].mean(axis=0)
+    return _unit(portrait if np.linalg.norm(portrait) > np.linalg.norm(landscape) else landscape)
 
 
 def fit_ground_plane(points, up, threshold, iterations=1000, min_alignment=0.85, seed=0, sample=200_000):
@@ -94,9 +101,13 @@ def extract_statue(points, up, center, box_min, box_max, voxel_fraction=0.01,
     up = _unit(up)
     extent = float(np.linalg.norm(box_max - box_min))
     threshold = threshold_fraction * extent
-    plane = fit_ground_plane(points, up, threshold)
     has_ground, normal, offset, ground_fraction = False, up, 0., 0.
-    if plane is not None and plane[2] >= 0.05:
+    # The sign of `up` is unknown for portrait photos: real ground has the scene above it,
+    # so only the correct sign passes the "below" check.
+    for direction in (up, -up):
+        plane = fit_ground_plane(points, direction, threshold)
+        if plane is None or plane[2] < 0.05:
+            continue
         signed = points @ plane[0] + plane[1]
         inliers = points[np.abs(signed) < threshold]
         axis = np.cross(plane[0], [1., 0., 0.] if abs(plane[0][0]) < 0.9 else [0., 1., 0.])
@@ -107,7 +118,8 @@ def extract_statue(points, up, center, box_min, box_max, voxel_fraction=0.01,
         # Real ground is wide and has the scene above it; a horizontal slice through
         # the statue (or a table-sized object) fails one of these checks.
         if min(spreads) >= 0.5 * float(np.min(box_max - box_min)) and below <= 0.1:
-            has_ground, (normal, offset, ground_fraction) = True, plane
+            has_ground, (normal, offset, ground_fraction), up = True, plane, direction
+            break
     keep_min = 2 * threshold
     candidates = points[points @ normal + offset > keep_min] if has_ground else points
     if not len(candidates):

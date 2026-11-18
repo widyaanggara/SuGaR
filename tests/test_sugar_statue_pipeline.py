@@ -92,6 +92,25 @@ class StatuePipelineTests(unittest.TestCase):
             self.assertTrue(manifest['statue_focus'])
             self.assertTrue(manifest['coarse_checkpoint'].startswith('coarse/reused/'))
 
+    def test_interrupted_run_still_lends_its_finished_coarse_model(self):
+        from pipeline_tools.dataset_registry import file_signature
+        module = load()
+        with tempfile.TemporaryDirectory() as temporary:
+            output, baseline = Path(temporary) / 'sugar', Path(temporary) / 'baseline'
+            write(baseline / 'point_cloud/iteration_7000/point_cloud.ply')
+            coarse = output / 'coarse/run/15000.pt'
+            write(coarse)
+            settings = dict(regularization='dn_consistency', image_downscale=1, image_max_size=1600,
+                            white_background=False)
+            context = dict(settings, baseline=file_signature(baseline / 'point_cloud/iteration_7000/point_cloud.ply'),
+                           scene={'scene': 'x'})
+            write(output / 'recovery/stages/abc/coarse.json', json.dumps(dict(
+                identity={'context': context}, output=str(coarse), signature=file_signature(coarse))))
+            self.assertEqual(Path(module.previous_coarse(output, baseline, settings, scene={'scene': 'x'})),
+                             coarse.resolve())
+            self.assertIsNone(module.previous_coarse(output, baseline, dict(settings, image_max_size=800)))
+            self.assertIsNone(module.previous_coarse(output, baseline, settings, scene={'scene': 'other'}))
+
     def test_statue_focus_falls_back_to_scene_mesh_when_cameras_are_unusable(self):
         module = load()
         with tempfile.TemporaryDirectory() as temporary:

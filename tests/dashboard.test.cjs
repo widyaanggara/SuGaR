@@ -881,8 +881,19 @@ test('old high_poly default switches once to the statue preset and keeps other s
   await app.events.DOMContentLoaded();
   assert.equal(app.nodes.get('settingsPreset').value, 'statue_quality');
   assert.equal(app.nodes.get('gaussiansPerTriangle').value, '3');
+  assert.equal(app.nodes.get('refinementTime').value, 'medium');
   assert.equal(app.nodes.get('imageDownscale').value, '2');
   vm.runInContext("applyPreset('official_high')", app.context);
   vm.runInContext('initializeSettings()', app.context);
   assert.equal(app.nodes.get('settingsPreset').value, 'official_high', 'an explicit later choice is respected');
+});
+
+test('an older saved version of the recommendation moves to the current one', async () => {
+  const app = page();
+  app.storage.set('sugar-preset-statue-quality-v1', '1');
+  app.storage.set('sugar-experiment-settings-v1', JSON.stringify({settingsPreset: 'statue_quality',
+    meshTriangles: '1000000', gaussiansPerTriangle: '3', refinementTime: 'long', regularization: 'dn_consistency'}));
+  await app.events.DOMContentLoaded();
+  assert.equal(app.nodes.get('settingsPreset').value, 'statue_quality');
+  assert.equal(app.nodes.get('refinementTime').value, 'medium');
 });

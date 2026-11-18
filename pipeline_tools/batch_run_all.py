@@ -22,6 +22,46 @@ def run_stage(script, arguments, root=PROJECT_ROOT):
     subprocess.run(command, cwd=str(root), check=True)
 
 
+def sugar_result_matches(out_sugar, sugar_config, sugar_mesh_export, image_downscale, image_max_size):
+    """A finished SuGaR result produced with exactly these settings (statue-focused mesh)."""
+    if not has_sugar_result(out_sugar):
+        return False
+    try:
+        config = json.loads((Path(out_sugar) / 'pipeline_result.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    return (config.get('decimation_target', config.get('target_triangles')) == sugar_config['vertices']
+            and config.get('regularization') == sugar_config['regularization']
+            and config.get('gaussians_per_triangle') == sugar_config['gaussians_per_triangle']
+            and config.get('refinement_iterations') == {'short': 2000, 'medium': 7000, 'long': 15000}[sugar_config['refinement_time']]
+            and bool(config.get('textured_mesh')) == (sugar_mesh_export == 'obj')
+            and config.get('image_downscale') == image_downscale and config.get('image_max_size') == image_max_size
+            # Older results meshed the whole scene and were cropped; redo mesh + refinement.
+            and config.get('statue_focus') is True)
+
+
+def pipeline_complete(root, statue_class, model_id, image_downscale, image_max_size, sugar_config,
+                      sugar_mesh_export='obj', skip_sugar=False, include_external=True, experiment='baseline'):
+    """Every method of a full pipeline is trained and evaluated with these settings.
+
+    Used to keep finished models out of the queue; the pipeline itself still checks each stage.
+    """
+    from pipeline_tools.external_methods import output_base, trained, visual_metrics
+    base = Path(output_base(root, experiment))
+    out_3dgs, out_sugar = (base / key / statue_class / model_id for key in ('3dgs', 'sugar'))
+    if not (has_checkpoint(out_3dgs, 30000) and has_evaluation(out_3dgs)
+            and evaluation_matches(out_3dgs, image_downscale, image_max_size)):
+        return False
+    if not skip_sugar and not (sugar_result_matches(out_sugar, sugar_config, sugar_mesh_export,
+                                                    image_downscale, image_max_size)
+                               and has_evaluation(out_sugar)
+                               and evaluation_matches(out_sugar, image_downscale, image_max_size)):
+        return False
+    return not include_external or all(
+        trained(base / key / statue_class / model_id) and visual_metrics(base / key / statue_class / model_id)
+        for key in ('2dgs', 'radegs'))
+
+
 def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          skip_3dgs=False, skip_sugar=False, refinement_time="short",
                          gpu=0, use_gpu_colmap=False, resume=True, vertices=250000,
@@ -112,16 +152,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
     else:
         print('[RESUME] Training 3DGS sudah lengkap dan konfigurasinya cocok; dilewati.', flush=True)
     trained_sugar = False
-    sugar_matches = False
-    if has_sugar_result(out_sugar):
-        config = json.loads((out_sugar / 'pipeline_result.json').read_text(encoding='utf-8'))
-        sugar_matches = (config.get('decimation_target', config.get('target_triangles')) == vertices and config.get('regularization') == regularization
-                         and config.get('gaussians_per_triangle') == gaussians_per_triangle
-                         and config.get('refinement_iterations') == {'short': 2000, 'medium': 7000, 'long': 15000}[refinement_time]
-                         and bool(config.get('textured_mesh')) == (sugar_mesh_export == 'obj')
-                         # Older results meshed the whole scene and were cropped; redo mesh + refinement.
-                         and config.get('statue_focus') is True
-                         and config.get('image_downscale') == image_downscale and config.get('image_max_size') == image_max_size)
+    sugar_matches = sugar_result_matches(out_sugar, sugar_config, sugar_mesh_export, image_downscale, image_max_size)
     if not skip_sugar and not (resume and not trained_3dgs and sugar_matches):
         run_stage("04_train_sugar.py", ["-s", scene_dir, "-c", out_3dgs, *common,
                   '-o', out_sugar, *experiment_args,

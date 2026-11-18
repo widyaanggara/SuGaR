@@ -9,9 +9,9 @@
   },
   "presets": {
     "statue_quality": {
-      "label": "SuGaR fokus patung · 3 Gaussian · long (rekomendasi)",
-      "description": "Rekomendasi penelitian ini (bukan preset resmi): mesh patung saja + background masing-masing 1.000.000 segitiga, 3 Gaussian/segitiga untuk mengurangi blur background, refinement 15.000 iterasi, dn_consistency. Tetap SuGaR murni; waktu refinement dan VRAM naik dibanding high_poly (kurang lebih 3x Gaussian). Pengurangan blur belum dibuktikan pada dataset ini.",
-      "values": {"vertices": 1000000, "gaussians_per_triangle": 3, "refinement_time": "long", "regularization": "dn_consistency"}
+      "label": "SuGaR fokus patung · 3 Gaussian · medium (rekomendasi)",
+      "description": "Rekomendasi penelitian ini (bukan preset resmi): mesh patung, sekitar patung, dan background masing-masing hingga 1.000.000 segitiga; 3 Gaussian/segitiga untuk mengurangi blur background; refinement medium 7.000 iterasi (opsi resmi SuGaR) agar waktu sebanding dengan baseline; dn_consistency. Mesh object.ply ditentukan saat ekstraksi, sehingga iterasi refinement hampir tidak memengaruhi detail mesh. Tetap SuGaR murni. Dampak 7.000 vs 15.000 iterasi pada PSNR belum diukur pada dataset ini.",
+      "values": {"vertices": 1000000, "gaussians_per_triangle": 3, "refinement_time": "medium", "regularization": "dn_consistency"}
     },
     "official_high": {
       "label": "SuGaR high_poly · long",

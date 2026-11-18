@@ -61,6 +61,12 @@ class WorkspaceTests(unittest.TestCase):
             automatic, _ = prepare_jobs(dict(action='full_pipeline'), root)
             self.assertEqual(len(automatic), 2)
             self.assertNotIn('--skip_colmap', build_command(automatic[0], root))
+            self.assertNotIn('--skip_sugar', build_command(automatic[0], root))
+            later, _ = prepare_jobs(dict(action='full_pipeline', skip_sugar=True), root)
+            self.assertTrue(all('--skip_sugar' in build_command(job, root) for job in later))
+            for invalid in (dict(skip_sugar='yes'), dict(action='3dgs', class_name='Dewa', model_id='model_01', skip_sugar=True)):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    prepare_jobs(invalid, root)
             for invalid in (dict(pipeline_start=True), dict(pipeline_start='wrong'),
                             dict(action='3dgs', class_name='Dewa', model_id='model_01', pipeline_start='existing_colmap')):
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):

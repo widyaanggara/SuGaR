@@ -514,6 +514,7 @@ function openQueueDialog(cls = '', mdl = '', action = 'full_pipeline') {
   populateQueueModels(mdl);
   $('queueMethod').value = $('evaluationMethod').value || 'both';
   $('queuePipelineStart').value = 'auto';
+  $('queueMethods').value = 'all';
   $('queueApplyIcp').checked = true;
   $('queueAlignment').value = mdl ? cachedStatus[cls]?.[mdl]?.geometry_settings?.alignment_mode || 'automatic' : 'automatic';
   $('queueDialogError').textContent = '';
@@ -675,10 +676,13 @@ function updateQueuePlan() {
   const scaffoldSelected = $('queueExperiment').value === 'scaffold_anchor';
   $('queueScaffoldOptions').hidden = !scaffoldSelected;
   $('queueExperiment').disabled = busy;
+  $('queueMethods').disabled = busy;
   for (const id of ['queueScaffoldRepo', 'queueScaffoldPython', 'queueScaffoldIterations', 'queueScaffoldResolution']) $(id).disabled = busy;
   $('queuePipelineHelp').textContent = $('queuePipelineStart').value === 'existing_colmap'
     ? 'Memakai images/ dan sparse/0 yang sudah ada, termasuk hasil dari komputer lain. Per patung: 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi semua metode. COLMAP tidak dijalankan ulang; target yang belum lengkap dilewati. Pengaturan resolusi training tetap berlaku.'
     : 'Dengan Lewati tahap yang selesai aktif, setiap model melanjutkan dari hasil terakhir yang tersedia. COLMAP lengkap, termasuk hasil teman, langsung dipakai. Training dan evaluasi yang lengkap serta cocok dilewati; checkpoint parsial yang cocok dipulihkan. Pengaturan COLMAP diterapkan hanya saat membuat COLMAP baru. Untuk interrupted, gunakan Antrekan Ulang agar pengaturan asli dan prioritas pemulihannya dipertahankan.';
+  if ($('queueMethods').value === 'without_sugar') $('queuePipelineHelp').textContent +=
+    ' SuGaR dilewati: urutannya 3DGS → 2DGS → RaDe-GS → evaluasi. Checkpoint 3DGS 7k tetap disimpan, jadi SuGaR dapat dijalankan belakangan dari pipeline lengkap (pilih Semua) atau tombol SuGaR tanpa melatih ulang 3DGS.';
   $('queueApplyIcp').disabled = busy;
   if (scaffoldSelected) $('queuePipelineHelp').textContent = 'Per patung: COLMAP → Scaffold-GS → anchor bersama → 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi semua metode. Output ablasi terpisah. Tahap Scaffold yang terputus dimulai ulang; tahap Scaffold yang selesai dan cocok dilewati.';
   $('queueAlignment').disabled = busy;
@@ -732,6 +736,7 @@ async function submitQueueDialog() {
   const payload = {...readExperimentSettings(), ...queueSelection, action,
     pipeline_start: action === 'full_pipeline' ? $('queuePipelineStart').value : 'auto',
     experiment: action === 'full_pipeline' ? $('queueExperiment').value : 'baseline',
+    skip_sugar: action === 'full_pipeline' && $('queueMethods').value === 'without_sugar',
     include_external: true,
     python_2dgs: ($('queuePython2dgs').value || '').trim(),
     python_radegs: ($('queuePythonRadegs').value || '').trim(),

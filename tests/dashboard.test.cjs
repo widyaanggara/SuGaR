@@ -226,6 +226,7 @@ test('full pipeline queues four methods per statue for baseline and Scaffold abl
     await vm.runInContext('submitQueueDialog()', app.context);
     const payload = app.calls.filter(([url]) => url === '/api/run').at(-1)[1];
     assert.equal(payload.include_external, true);
+    assert.equal(payload.skip_sugar, false);
     assert.equal(payload.experiment, experiment);
     assert.equal(payload.python_2dgs, '/env/2dgs/python');
     assert.equal(payload.python_radegs, '/env/radegs/python');

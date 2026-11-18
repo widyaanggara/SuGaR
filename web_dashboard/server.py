@@ -123,6 +123,14 @@ def get_preview_images(cls, mdl, root=PROJECT_ROOT):
         for index, path in enumerate(media_files(folder)[:3]):
             items.append({"src": "/static/" + path.relative_to(root).as_posix(),
                           "label": f"{method} test view #{index + 1}", "type": method})
+    # SuGaR optimization runs live in their own folders; newest run first.
+    quality = Path(root) / 'outputs/quality/sugar' / cls / mdl
+    runs = [path for path in quality.glob('*/evaluation/renders') if media_files(path)] if quality.is_dir() else []
+    for folder in sorted(runs, key=lambda path: path.stat().st_mtime, reverse=True)[:2]:
+        for index, path in enumerate(media_files(folder)[:3]):
+            items.append({"src": "/static/" + path.relative_to(root).as_posix(),
+                          "label": f"sugar optimasi {folder.parent.parent.name} test view #{index + 1}",
+                          "type": "sugar_quality"})
     return {"images": items}
 
 
@@ -169,6 +177,8 @@ def build_command(job, root=PROJECT_ROOT):
             args.append("--no_resume")
         if job.get('pipeline_start') == 'existing_colmap':
             args.append('--skip_colmap')
+        if job.get('skip_sugar', False):
+            args.append('--skip_sugar')
         if job.get('experiment', 'baseline') == 'scaffold_anchor':
             args.extend(['--experiment', 'scaffold_anchor', '--scaffold_repo', job['scaffold_repo'],
                          '--scaffold_python', job.get('scaffold_python') or sys.executable,
@@ -267,6 +277,9 @@ def prepare_jobs(data, root=PROJECT_ROOT):
         raise ValueError('Awal pipeline harus auto atau existing_colmap.')
     if pipeline_start != 'auto' and action != 'full_pipeline':
         raise ValueError('Awal pipeline hanya berlaku untuk Pipeline lengkap.')
+    skip_sugar = data.get('skip_sugar', False)
+    if not isinstance(skip_sugar, bool) or (skip_sugar and action != 'full_pipeline'):
+        raise ValueError('Lewati SuGaR hanya berlaku untuk Pipeline lengkap dan harus boolean.')
     cls, mdl = data.get("class_name", ""), data.get("model_id", "")
     if not isinstance(cls, str) or not isinstance(mdl, str):
         raise ValueError("Kelas dan model harus berupa teks.")
@@ -396,7 +409,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                              **({'sugar_quality': quality} if quality else {}),
                              object_region={'mode': 'camera_focus_v1'},
                              experiment=experiment, **scaffold,
-                             pipeline_start=pipeline_start,
+                             pipeline_start=pipeline_start, skip_sugar=skip_sugar,
                              resume=data.get("resume", True) is True,
                              evaluation_method=current_method, scale_factor=scale, apply_icp=apply_icp,
                              geometry_options=options,

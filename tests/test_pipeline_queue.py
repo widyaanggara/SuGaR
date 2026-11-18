@@ -239,6 +239,24 @@ class QueueTests(unittest.TestCase):
             finally:
                 queue.close()
 
+    def test_remove_one_job_or_all_finished_jobs_but_never_the_running_one(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            queue = JobQueue(temporary, lambda _: [sys.executable, '-c', 'pass'], start_worker=False)
+            added, _ = queue.enqueue([spec(), spec(action='evaluate_visual', method='3DGS'),
+                                      spec(action='evaluate_visual'), spec(model='model_02')])
+            statuses = ('COMPLETED', 'FAILED', 'RUNNING', 'QUEUED')
+            for job, status in zip(queue.jobs, statuses):
+                job['status'] = status
+            with self.assertRaisesRegex(ValueError, 'Stop'):
+                queue.remove(added[2])
+            self.assertEqual(queue.remove(added[3]), 1)
+            self.assertEqual(queue.remove(), 2)
+            self.assertEqual([job['id'] for job in queue.jobs], [added[2]])
+            reloaded = json.loads((Path(temporary) / 'outputs/queue/state.json').read_text())
+            self.assertEqual([job['id'] for job in reloaded['jobs']], [added[2]])
+            with self.assertRaisesRegex(ValueError, 'tidak ditemukan'):
+                queue.remove('missing')
+
     def test_restart_marks_active_interrupted_and_keeps_pending_paused(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -402,7 +420,7 @@ class RunnerTests(unittest.TestCase):
                     manifest = dict(coarse_mesh='mesh/test.ply', refined_checkpoint='refined/test/2000.pt',
                         textured_mesh='textured_mesh/test.obj', target_triangles=250000,
                         refinement_iterations=2000, regularization='dn_consistency', image_downscale=1, image_max_size=1600,
-                        gaussians_per_triangle=1)
+                        gaussians_per_triangle=1, statue_focus=True)
                     write(sugar / 'pipeline_result.json', json.dumps(manifest))
                 elif script == '06_evaluate_rendering.py':
                     method = args[args.index('--method') + 1]

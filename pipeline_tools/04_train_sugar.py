@@ -18,6 +18,43 @@ from pipeline_tools.recovery_state import (configure_recovery, scene_identity, c
                                           StageJournal, fingerprint)
 
 
+def statue_focus_options(checkpoint_3dgs, n_vertices):
+    """Mesh only the statue (ground and neighbours go to the background mesh).
+
+    Same SuGaR extraction otherwise: SuGaR's camera-based foreground/background boxes, upstream
+    Poisson depth 10, and the chosen mesh budget for the statue, its surroundings and the background
+    each. Vertex projection is off so the statue part keeps its order and object.ply is the statue
+    part of the refined mesh itself, not a crop.
+    """
+    from pipeline_tools.sugar_focus import camera_focus_region
+    from sugar_utils.statue_focus import camera_up
+    cameras = json.loads((Path(checkpoint_3dgs) / 'cameras.json').read_text(encoding='utf-8'))
+    return dict(region=camera_focus_region(cameras), foreground_box='upstream',
+                poisson_depth=10, statue_poisson_depth=10,
+                foreground_triangle_target=n_vertices, background_triangle_target=n_vertices,
+                project_mesh_on_surface_points=False, statue_focus=True,
+                up=camera_up([camera['rotation'] for camera in cameras]).tolist())
+
+
+def previous_coarse(output_dir, checkpoint_3dgs, settings):
+    """A finished coarse model from an earlier run of the same scene/settings.
+
+    Coarse optimization does not depend on mesh extraction, so switching the mesh to statue focus
+    only reruns mesh extraction and refinement.
+    """
+    try:
+        previous = json.loads((output_dir / 'pipeline_result.json').read_text(encoding='utf-8'))
+        candidate = (output_dir / previous['coarse_checkpoint']).resolve()
+        baseline = file_signature(Path(checkpoint_3dgs) / 'point_cloud/iteration_7000/point_cloud.ply')
+        if (candidate.is_relative_to(output_dir.resolve()) and candidate.is_file() and candidate.stat().st_size
+                and previous.get('baseline_signature') == baseline
+                and all(previous.get(key) == value for key, value in settings.items())):
+            return str(candidate)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
 def train_sugar_pipeline(scene_path: str,
                          checkpoint_3dgs: str,
                          output_base_dir: str,
@@ -33,7 +70,8 @@ def train_sugar_pipeline(scene_path: str,
                          image_max_size: int = 1600,
                          resume: bool = True,
                          quality_options=None,
-                         reuse_coarse=None):
+                         reuse_coarse=None,
+                         statue_focus=False):
     """
     Menjalankan pipeline SuGaR lengkap secara teratur dan aman dari masalah memori/path.
     
@@ -80,6 +118,16 @@ def train_sugar_pipeline(scene_path: str,
 
     output_dir = Path(output_base_dir).resolve()
     manifest_path = output_dir / 'pipeline_result.json'
+    if statue_focus and not quality_options:
+        try:
+            quality_options = statue_focus_options(checkpoint_3dgs, n_vertices)
+        except (OSError, ValueError, KeyError) as exc:
+            message = f'[WARNING] Fokus patung tidak dapat dipakai ({exc}); mesh seluruh scene seperti sebelumnya.'
+            logger.log(message, level='warning') if logger else print(message, flush=True)
+        if quality_options and reuse_coarse is None and resume:
+            reuse_coarse = previous_coarse(output_dir, checkpoint_3dgs, dict(
+                regularization=regularization_type, image_downscale=image_downscale,
+                image_max_size=image_max_size, white_background=white_background))
     if manifest_path.exists():
         manifest_path.unlink()
     coarse_dir = output_dir / "coarse"
@@ -154,7 +202,8 @@ def train_sugar_pipeline(scene_path: str,
         import shutil
         copied = coarse_dir / 'reused' / Path(reuse_coarse).name
         copied.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(reuse_coarse, copied)
+        if Path(reuse_coarse).resolve() != copied.resolve():
+            shutil.copy2(reuse_coarse, copied)
         coarse_sugar_path = str(copied)
         journal.complete('coarse', {}, coarse_sugar_path)
     coarse_reused = coarse_sugar_path is not None
@@ -199,10 +248,12 @@ def train_sugar_pipeline(scene_path: str,
     })
     if quality_options:
         region = quality_options['region']
-        coarse_mesh_args.update(
-            bboxmin=str(tuple(region['min'])), bboxmax=str(tuple(region['max'])),
-            center_bbox=False, poisson_depth=quality_options['poisson_depth'],
-            save_predecimation=True)
+        if quality_options.get('foreground_box', 'focus') == 'focus':
+            coarse_mesh_args.update(bboxmin=str(tuple(region['min'])), bboxmax=str(tuple(region['max'])),
+                                    center_bbox=False)
+        # Otherwise SuGaR's own camera-based foreground/background boxes are kept.
+        coarse_mesh_args.update(poisson_depth=quality_options['poisson_depth'], save_predecimation=True,
+                                statue_box=(tuple(region['min']), tuple(region['max'])))
         coarse_mesh_args.update(
             foreground_triangle_target=quality_options.get('foreground_triangle_target', n_vertices),
             background_triangle_target=quality_options.get('background_triangle_target', n_vertices),
@@ -215,6 +266,8 @@ def train_sugar_pipeline(scene_path: str,
     mesh_inputs = {'coarse': file_signature(Path(coarse_sugar_path))}
     coarse_mesh_path = journal.get('mesh', mesh_inputs)
     if coarse_mesh_path is None:
+        for stale in ('statue_split.json', 'statue_region.npz'):
+            (mesh_dir / stale).unlink(missing_ok=True)  # never pair a new mesh with an old split
         coarse_mesh_path = extract_mesh_from_coarse_sugar(coarse_mesh_args)[0]
         journal.complete('mesh', mesh_inputs, coarse_mesh_path)
 
@@ -329,6 +382,7 @@ def train_sugar_pipeline(scene_path: str,
                     white_background=white_background, scene_path=scene_path)
     manifest.update(image_downscale=image_downscale, image_max_size=image_max_size)
     manifest['mesh_export'] = 'obj' if export_obj else 'surface'
+    manifest['statue_focus'] = bool(statue_focus)
     if quality_options:
         manifest['quality_options'] = quality_options
     if logger:
@@ -359,6 +413,8 @@ def main():
     parser.add_argument('--mesh_export', choices=('obj', 'surface'), default='obj',
                         help='surface mengekspor geometri refined tanpa baking tekstur OBJ.')
     parser.add_argument('--object_region_json', default='{"mode":"camera_focus_v1"}')
+    parser.add_argument('--statue_focus', action=argparse.BooleanOptionalAction, default=True,
+                        help='Mesh hanya patung (tanah/objek tetangga masuk mesh background); render tetap seluruh scene.')
     parser.add_argument("--gpu", type=int, default=0, help="ID GPU device (default: 0).")
     parser.add_argument("--white_background", "-w", action="store_true", help="Gunakan background putih.")
     add_resolution_arguments(parser)
@@ -405,7 +461,8 @@ def main():
                 logger=logger,
                 image_downscale=args.image_downscale,
                 image_max_size=args.image_max_size,
-                export_obj=args.mesh_export == 'obj'
+                export_obj=args.mesh_export == 'obj',
+                statue_focus=args.statue_focus
             )
             from pipeline_tools.object_region import resolve_region
             from pipeline_tools.object_mesh import export_optional

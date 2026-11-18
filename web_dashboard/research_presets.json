@@ -1,5 +1,5 @@
 {
-  "default": "official_high",
+  "default": "statue_quality",
   "source": {
     "repository": "https://github.com/Anttwo/SuGaR",
     "readme": "https://github.com/Anttwo/SuGaR#quick-start",
@@ -8,6 +8,11 @@
     "scope": "Konfigurasi SuGaR saja. Resolusi foto dan COLMAP adalah parameter protokol penelitian ini, bukan preset resmi RTX 4090."
   },
   "presets": {
+    "statue_quality": {
+      "label": "SuGaR fokus patung · 3 Gaussian · long (rekomendasi)",
+      "description": "Rekomendasi penelitian ini (bukan preset resmi): mesh patung saja + background masing-masing 1.000.000 segitiga, 3 Gaussian/segitiga untuk mengurangi blur background, refinement 15.000 iterasi, dn_consistency. Tetap SuGaR murni; waktu refinement dan VRAM naik dibanding high_poly (kurang lebih 3x Gaussian). Pengurangan blur belum dibuktikan pada dataset ini.",
+      "values": {"vertices": 1000000, "gaussians_per_triangle": 3, "refinement_time": "long", "regularization": "dn_consistency"}
+    },
     "official_high": {
       "label": "SuGaR high_poly · long",
       "description": "Konfigurasi high_poly dan refinement long dari repo resmi: parameter mesh 1.000.000, 1 Gaussian/segitiga, 15.000 iterasi. Tidak menjamin muat di VRAM tiap scene.",

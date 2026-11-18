@@ -119,6 +119,8 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          and config.get('gaussians_per_triangle') == gaussians_per_triangle
                          and config.get('refinement_iterations') == {'short': 2000, 'medium': 7000, 'long': 15000}[refinement_time]
                          and bool(config.get('textured_mesh')) == (sugar_mesh_export == 'obj')
+                         # Older results meshed the whole scene and were cropped; redo mesh + refinement.
+                         and config.get('statue_focus') is True
                          and config.get('image_downscale') == image_downscale and config.get('image_max_size') == image_max_size)
     if not skip_sugar and not (resume and not trained_3dgs and sugar_matches):
         run_stage("04_train_sugar.py", ["-s", scene_dir, "-c", out_3dgs, *common,

@@ -873,3 +873,16 @@ test('evaluation tabs restore two method rows per statue and Excel exports all e
   assert.match(app.nodes.get('metricsBody').innerHTML, /Belum ada hasil evaluasi/);
   assert.equal(app.nodes.get('kpiPsnr').textContent, '\u2014');
 });
+
+test('old high_poly default switches once to the statue preset and keeps other saved settings', async () => {
+  const app = page();
+  app.storage.set('sugar-experiment-settings-v1', JSON.stringify({settingsPreset: 'official_high',
+    meshTriangles: '1000000', gaussiansPerTriangle: '1', refinementTime: 'long', regularization: 'dn_consistency', imageDownscale: '2'}));
+  await app.events.DOMContentLoaded();
+  assert.equal(app.nodes.get('settingsPreset').value, 'statue_quality');
+  assert.equal(app.nodes.get('gaussiansPerTriangle').value, '3');
+  assert.equal(app.nodes.get('imageDownscale').value, '2');
+  vm.runInContext("applyPreset('official_high')", app.context);
+  vm.runInContext('initializeSettings()', app.context);
+  assert.equal(app.nodes.get('settingsPreset').value, 'official_high', 'an explicit later choice is respected');
+});

@@ -18,6 +18,20 @@ sehingga setiap konfigurasi punya folder sendiri. Jalur ini tidak menjalankan CO
 3DGS, atau optimasi coarse ulang. Run yang terputus dapat dilanjutkan dengan
 perintah yang sama; checkpoint dipakai ulang hanya jika identitas tahap cocok.
 
+## Training SuGaR biasa juga fokus patung
+
+Training SuGaR dari dashboard (tombol SuGaR atau Pipeline lengkap) kini memakai fokus patung secara
+default: `outputs/sugar/<Kelas>/<Model>/object_mesh/object.ply` adalah bagian patung dari mesh refined,
+bukan crop kotak kamera. Pengaturan lain tetap dari panel Parameter SuGaR (budget mesh untuk patung,
+sekitar patung, dan background masing-masing; kotak foreground/background bawaan SuGaR tetap; Poisson
+depth 10 bawaan SuGaR; Gaussian/segitiga; refinement). Total segitiga bisa sampai 3x budget, sehingga
+VRAM perlu diuji pada satu patung dulu. Proyeksi vertex
+ke titik sampel dimatikan agar urutan segitiga patung terjaga. Hasil lama yang meshnya seluruh scene
+dianggap tidak cocok sehingga dijalankan ulang mulai dari ekstraksi mesh; checkpoint coarse dipakai ulang
+bila dataset, baseline 3DGS, regularisasi, dan resolusi sama. `--no-statue_focus` pada
+`04_train_sugar.py` mengembalikan perilaku lama. Bila fokus kamera gagal dihitung, log memberi peringatan
+dan mesh seluruh scene dipakai.
+
 ## Mesh patung dan background (tetap SuGaR murni)
 
 Semua Gaussian tetap terikat ke mesh, seperti SuGaR asli. Tidak ada Gaussian 3DGS bebas.
@@ -32,7 +46,9 @@ Semua Gaussian tetap terikat ke mesh, seperti SuGaR asli. Tidak ada Gaussian 3DG
 - **`object_mesh/object.ply` = bagian patung dari mesh refined itu sendiri**, bukan hasil
   crop. Segitiga patung berada di urutan pertama mesh gabungan (`mesh/statue_split.json`).
 - **Render tetap seluruh scene.** Tanah dan objek tetangga yang dibuang dari mesh patung
-  masuk ke mesh background, sehingga tetap dirender oleh Gaussian yang terikat mesh.
+  mendapat mesh Poisson sendiri dengan resolusi foreground (bukan digabung ke background yang
+  kasar), lalu digabung setelah patung: urutan mesh = patung, sekitar patung, background. Semua
+  tetap dirender oleh Gaussian yang terikat mesh.
 - **Blur background** dikurangi hanya lewat kapasitas SuGaR sendiri: Poisson background
   lebih rapat (`--poisson_depth`, default 11), 2.000.000 segitiga background, dan 3
   Gaussian per segitiga. Batasan bawaan SuGaR tetap ada (background jauh dari sedikit

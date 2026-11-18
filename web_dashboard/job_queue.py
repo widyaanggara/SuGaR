@@ -196,6 +196,30 @@ class JobQueue:
             self._save()
             return count
 
+    def remove(self, job_id=None):
+        """Delete jobs from the list: one job, or every finished one when job_id is None.
+
+        A running job must be stopped first. Results and log files on disk are kept.
+        """
+        finished = ('COMPLETED', 'FAILED', 'CANCELLED', 'INTERRUPTED')
+        with self.condition:
+            if job_id is None:
+                doomed = [job for job in self.jobs if job['status'] in finished]
+            else:
+                job = next((item for item in self.jobs if item['id'] == job_id), None)
+                if job is None:
+                    raise ValueError('Pekerjaan tidak ditemukan.')
+                if job['status'] in ('RUNNING', 'STOPPING'):
+                    raise ValueError('Pekerjaan sedang berjalan. Klik Stop dulu sebelum menghapusnya.')
+                doomed = [job]
+            ids = {job['id'] for job in doomed}
+            self.jobs = [job for job in self.jobs if job['id'] not in ids]
+            for removed in ids:
+                self.buffers.pop(removed, None)
+            self._save()
+            self.condition.notify_all()
+            return len(ids)
+
     def stop(self):
         # Pause first so the worker cannot start the next model during cleanup.
         with self.condition:

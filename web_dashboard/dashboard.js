@@ -298,6 +298,17 @@ function initializeSettings() {
       $('settingsPreset').value = 'custom';
     }
   }
+  // One-time switch from the old default (high_poly) to the statue-focus recommendation.
+  // Only the four SuGaR values change; resolution, COLMAP and GPU settings stay as saved.
+  try {
+    if (presets.statue_quality && !window.localStorage?.getItem('sugar-preset-statue-quality-v1')) {
+      if ($('settingsPreset').value === 'official_high') {
+        for (const [key, value] of Object.entries(presets.statue_quality.values)) $(sugarControlIds[key]).value = String(value);
+        $('settingsPreset').value = 'statue_quality';
+      }
+      window.localStorage?.setItem('sugar-preset-statue-quality-v1', '1');
+    }
+  } catch (_) { /* Browser storage may be blocked; defaults still apply. */ }
   for (const id of settingControls) {
     const changed = () => updateSettings(Object.values(sugarControlIds).includes(id));
     $(id).oninput = changed;
@@ -849,6 +860,14 @@ async function pollLogs() {
             } catch (error) { showToast(error.message); }
           } : () => queueControl('cancel', {job_id: job.id});
           row.lastElementChild.appendChild(button);
+        }
+        if (!['RUNNING', 'STOPPING'].includes(job.status)) {
+          const remove = document.createElement('button');
+          remove.className = 'btn btn-ghost btn-sm';
+          remove.textContent = 'Hapus';
+          remove.title = 'Hapus dari daftar antrean. Hasil training dan file log tetap tersimpan.';
+          remove.onclick = () => queueControl('remove', {job_id: job.id});
+          row.lastElementChild.appendChild(remove);
         }
         if (job.error) row.title = job.error;
         $('queueBody').appendChild(row);

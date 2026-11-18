@@ -530,6 +530,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 if job_id is not None and not isinstance(job_id, str):
                     raise ValueError("ID pekerjaan tidak valid.")
                 self.send_json({"cancelled": self.queue.cancel_pending(job_id)})
+            elif path in ("/api/queue/remove", "/api/queue/clear"):
+                job_id = data.get("job_id") if path.endswith("remove") else None
+                if path.endswith("remove") and not isinstance(job_id, str):
+                    raise ValueError("ID pekerjaan wajib diisi.")
+                removed = self.queue.remove(job_id)
+                self.send_json({"removed": removed, "message": f"{removed} pekerjaan dihapus dari daftar antrean."})
             else:
                 self.send_error(404)
         except (ValueError, TypeError, UnicodeError) as exc:

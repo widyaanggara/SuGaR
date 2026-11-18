@@ -375,22 +375,29 @@ def extract_mesh_from_coarse_sugar(args):
                 bg_normals = surface_normals[points_idx][bg_mask]
 
                 statue_region = None
+                near_points = None
                 if getattr(args, 'statue_focus', False):
-                    # Mesh only the statue: drop the ground plane and neighbouring objects
-                    # before Poisson. They move to the background mesh, so rendering still
-                    # covers the whole scene with mesh-bound Gaussians (pure SuGaR).
-                    if not use_custom_bbox:
+                    # Mesh the statue separately: the ground plane and neighbouring objects are
+                    # removed from the statue before Poisson. They keep their own foreground-
+                    # resolution mesh ("near"), so rendering still covers the whole scene with
+                    # mesh-bound Gaussians (pure SuGaR) and the ground is not coarsened.
+                    statue_box = getattr(args, 'statue_box', None)
+                    if statue_box is None and not use_custom_bbox:
                         raise ValueError('Fokus patung memerlukan batas fokus kamera (bboxmin/bboxmax).')
                     from sugar_utils.statue_focus import extract_statue, region_contains, save_region
                     fg_numpy = fg_points.detach().cpu().numpy()
-                    box_min, box_max = np.asarray(fg_bbox_min, float), np.asarray(fg_bbox_max, float)
-                    statue_region = extract_statue(fg_numpy, np.asarray(args.statue_up, float),
-                                                   (box_min + box_max) / 2, box_min, box_max)
-                    statue_mask = torch.from_numpy(region_contains(statue_region, fg_numpy)).to(fg_points.device)
-                    bg_points = torch.cat([bg_points, fg_points[~statue_mask]])
-                    bg_colors = torch.cat([bg_colors, fg_colors[~statue_mask]])
-                    bg_normals = torch.cat([bg_normals, fg_normals[~statue_mask]])
+                    box_min, box_max = (np.asarray(v, float) for v in (statue_box or (fg_bbox_min, fg_bbox_max)))
+                    in_box = np.all((fg_numpy > box_min) & (fg_numpy < box_max), axis=1)
+                    try:
+                        statue_region = extract_statue(fg_numpy[in_box], np.asarray(args.statue_up, float),
+                                                       (box_min + box_max) / 2, box_min, box_max)
+                    except ValueError as exc:
+                        CONSOLE.print(f"[WARNING] Fokus patung gagal ({exc}); mesh foreground seperti SuGaR asli.")
+                if statue_region is not None:
+                    statue_mask = torch.from_numpy(in_box & region_contains(statue_region, fg_numpy)).to(fg_points.device)
+                    near_points, near_colors, near_normals = (t[~statue_mask] for t in (fg_points, fg_colors, fg_normals))
                     fg_points, fg_colors, fg_normals = (t[statue_mask] for t in (fg_points, fg_colors, fg_normals))
+                    CONSOLE.print("Points around the statue:", near_points.shape)
                     save_region(os.path.join(mesh_output_dir, 'statue_region.npz'), statue_region)
                     CONSOLE.print("Statue focus:", statue_region['summary'])
                     if not statue_region['summary']['ground_found']:
@@ -465,6 +472,22 @@ def extract_mesh_from_coarse_sugar(args):
                 CONSOLE.print("Foreground mesh:", o3d_fg_mesh)
                 CONSOLE.print("Background mesh:", o3d_bg_mesh)
 
+                o3d_near_mesh = None
+                if near_points is not None and near_points.shape[0] > 0:
+                    CONSOLE.print("\n-----Mesh around the statue-----")
+                    near_pcd = o3d.geometry.PointCloud()
+                    near_pcd.points = o3d.utility.Vector3dVector(near_points.double().cpu().numpy())
+                    near_pcd.colors = o3d.utility.Vector3dVector(near_colors.double().cpu().numpy())
+                    near_pcd.normals = o3d.utility.Vector3dVector(near_normals.double().cpu().numpy())
+                    cl, ind = near_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=20.)
+                    near_pcd = near_pcd.select_by_index(ind)
+                    o3d_near_mesh, o3d_near_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                        near_pcd, depth=poisson_depth)
+                    if vertices_density_quantile > 0.:
+                        o3d_near_mesh.remove_vertices_by_mask(
+                            o3d_near_densities < np.quantile(o3d_near_densities, vertices_density_quantile))
+                    CONSOLE.print("Mesh around the statue:", o3d_near_mesh)
+
                 if getattr(args, 'save_predecimation', False) and o3d_fg_mesh is not None:
                     # Preserve evidence of detail before decimation/projection.
                     raw_path = os.path.join(mesh_output_dir, f'foreground_level{surface_level}_predecimation.ply')
@@ -494,6 +517,17 @@ def extract_mesh_from_coarse_sugar(args):
                         else:
                             decimated_o3d_bg_mesh = None
 
+                        decimated_o3d_near_mesh = None
+                        if o3d_near_mesh is not None:
+                            CONSOLE.print("Decimating mesh around the statue...")
+                            from sugar_utils.mesh_budget import simplify_mesh
+                            decimated_o3d_near_mesh = simplify_mesh(
+                                o3d_near_mesh, getattr(args, 'background_triangle_target', decimation_target))
+                            decimated_o3d_near_mesh.remove_duplicated_vertices()
+                            decimated_o3d_near_mesh.remove_degenerate_triangles()
+                            decimated_o3d_near_mesh.remove_duplicated_triangles()
+                            decimated_o3d_near_mesh.remove_non_manifold_edges()
+
                     if clean_mesh:
                         CONSOLE.print("Cleaning mesh...")
                         if decimated_o3d_fg_mesh is not None:
@@ -519,6 +553,12 @@ def extract_mesh_from_coarse_sugar(args):
                         decimated_o3d_mesh = decimated_o3d_bg_mesh
                     else:
                         raise ValueError("Both foreground and background meshes are empty. Please provide a valid bounding box for the scene.")
+                    if statue_region is not None and decimated_o3d_near_mesh is not None:
+                        # Statue first, then its surroundings, then the background: the split stays exact.
+                        if decimated_o3d_fg_mesh is None:
+                            raise ValueError('Mesh patung kosong.')
+                        rest = decimated_o3d_near_mesh + decimated_o3d_bg_mesh if decimated_o3d_bg_mesh is not None else decimated_o3d_near_mesh
+                        decimated_o3d_mesh = decimated_o3d_fg_mesh + rest
                     
                     # Project Mesh on extracted surface points for better details
                     if project_mesh_on_surface_points:

@@ -60,6 +60,24 @@ def staged_anchor_scene(scene, output, initial_ply):
     return target
 
 
+def portable_identity(identity):
+    """Dataset identity that survives moving/copying the project folder.
+
+    The absolute scene path and image modification times change when the project is moved,
+    copied or synced, while the photos stay the same. Photos are compared by name and size;
+    the COLMAP model and every other setting keep their exact comparison.
+    """
+    identity = dict(identity)
+    scene = identity.get('scene')
+    if isinstance(scene, dict):
+        scene = {key: value for key, value in scene.items() if key != 'scene'}
+        if isinstance(scene.get('images'), dict):
+            scene['images'] = {name: value.get('size') if isinstance(value, dict) else value
+                               for name, value in scene['images'].items()}
+        identity['scene'] = scene
+    return identity
+
+
 def training_identities_match(previous, current):
     """Compare effective settings; shared camera sizing overrides native -r.
 
@@ -68,7 +86,7 @@ def training_identities_match(previous, current):
     """
     if not isinstance(previous, dict):
         return False
-    previous, current = dict(previous), dict(current)
+    previous, current = portable_identity(previous), portable_identity(current)
     if previous.get('visual_protocol') and current.get('visual_protocol'):
         previous.pop('resolution', None)
         current.pop('resolution', None)

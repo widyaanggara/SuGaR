@@ -374,6 +374,28 @@ def extract_mesh_from_coarse_sugar(args):
                 bg_colors = surface_colors[points_idx][bg_mask]
                 bg_normals = surface_normals[points_idx][bg_mask]
 
+                statue_region = None
+                if getattr(args, 'statue_focus', False):
+                    # Mesh only the statue: drop the ground plane and neighbouring objects
+                    # before Poisson. They move to the background mesh, so rendering still
+                    # covers the whole scene with mesh-bound Gaussians (pure SuGaR).
+                    if not use_custom_bbox:
+                        raise ValueError('Fokus patung memerlukan batas fokus kamera (bboxmin/bboxmax).')
+                    from sugar_utils.statue_focus import extract_statue, region_contains, save_region
+                    fg_numpy = fg_points.detach().cpu().numpy()
+                    box_min, box_max = np.asarray(fg_bbox_min, float), np.asarray(fg_bbox_max, float)
+                    statue_region = extract_statue(fg_numpy, np.asarray(args.statue_up, float),
+                                                   (box_min + box_max) / 2, box_min, box_max)
+                    statue_mask = torch.from_numpy(region_contains(statue_region, fg_numpy)).to(fg_points.device)
+                    bg_points = torch.cat([bg_points, fg_points[~statue_mask]])
+                    bg_colors = torch.cat([bg_colors, fg_colors[~statue_mask]])
+                    bg_normals = torch.cat([bg_normals, fg_normals[~statue_mask]])
+                    fg_points, fg_colors, fg_normals = (t[statue_mask] for t in (fg_points, fg_colors, fg_normals))
+                    save_region(os.path.join(mesh_output_dir, 'statue_region.npz'), statue_region)
+                    CONSOLE.print("Statue focus:", statue_region['summary'])
+                    if not statue_region['summary']['ground_found']:
+                        CONSOLE.print("[WARNING] Bidang tanah tidak terdeteksi; lantai yang menyatu dengan patung dapat ikut ke mesh.")
+
                 CONSOLE.print("Foreground points:", fg_points.shape, fg_colors.shape, fg_normals.shape)
                 CONSOLE.print("Background points:", bg_points.shape, bg_colors.shape, bg_normals.shape)
                 
@@ -395,12 +417,18 @@ def extract_mesh_from_coarse_sugar(args):
 
                     CONSOLE.print("Now computing mesh...")
                     o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-                        fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
+                        fg_pcd, depth=(getattr(args, 'statue_poisson_depth', poisson_depth) if statue_region is not None
+                                       else poisson_depth)) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
 
                     if vertices_density_quantile > 0.:
                         CONSOLE.print("Removing vertices with low densities...")
                         vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
                         o3d_fg_mesh.remove_vertices_by_mask(vertices_to_remove)
+                    if statue_region is not None:
+                        # Poisson closes the open pedestal bottom and bulges past the points; cut both.
+                        outside = ~region_contains(statue_region, np.asarray(o3d_fg_mesh.vertices))
+                        o3d_fg_mesh.remove_vertices_by_mask(outside)
+                        CONSOLE.print(f"Statue mesh trimmed: {int(outside.sum())} vertices outside the statue removed.")
                 else:
                     CONSOLE.print("\n[WARNING] Foreground is empty.")
                     o3d_fg_mesh = None
@@ -450,14 +478,18 @@ def extract_mesh_from_coarse_sugar(args):
                     if decimate_mesh:
                         if o3d_fg_mesh is not None:
                             CONSOLE.print("Decimating foreground mesh...")
-                            decimated_o3d_fg_mesh = o3d_fg_mesh.simplify_quadric_decimation(decimation_target)
+                            from sugar_utils.mesh_budget import simplify_mesh
+                            decimated_o3d_fg_mesh = simplify_mesh(
+                                o3d_fg_mesh, getattr(args, 'foreground_triangle_target', decimation_target))
                             CONSOLE.print("Finished decimating foreground mesh.")
                         else:
                             decimated_o3d_fg_mesh = None
                             
                         if o3d_bg_mesh is not None:                            
                             CONSOLE.print("Decimating background mesh...")
-                            decimated_o3d_bg_mesh = o3d_bg_mesh.simplify_quadric_decimation(decimation_target)
+                            from sugar_utils.mesh_budget import simplify_mesh
+                            decimated_o3d_bg_mesh = simplify_mesh(
+                                o3d_bg_mesh, getattr(args, 'background_triangle_target', decimation_target))
                             CONSOLE.print("Finished decimating background mesh.")
                         else:
                             decimated_o3d_bg_mesh = None
@@ -535,6 +567,18 @@ def extract_mesh_from_coarse_sugar(args):
                     o3d.io.write_triangle_mesh(sugar_mesh_path, decimated_o3d_mesh, write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
                     CONSOLE.print("Mesh saved at", sugar_mesh_path)
                     all_sugar_mesh_paths.append(sugar_mesh_path)
+                    if statue_region is not None and not project_mesh_on_surface_points:
+                        # Statue vertices/triangles come first in the merged mesh and SuGaR keeps
+                        # that order, so the refined statue is exported exactly, not by cropping.
+                        import json
+                        split = {'mesh': os.path.basename(sugar_mesh_path),
+                                 'statue_vertices': len(decimated_o3d_fg_mesh.vertices) if decimated_o3d_fg_mesh is not None else 0,
+                                 'statue_triangles': len(decimated_o3d_fg_mesh.triangles) if decimated_o3d_fg_mesh is not None else 0,
+                                 'total_vertices': len(decimated_o3d_mesh.vertices),
+                                 'total_triangles': len(decimated_o3d_mesh.triangles)}
+                        with open(os.path.join(mesh_output_dir, 'statue_split.json'), 'w', encoding='utf-8') as stream:
+                            json.dump(split, stream, indent=2)
+                        CONSOLE.print("Statue/background split:", split)
                     
         else:
             CONSOLE.print("\nWARNING: Using centers of gaussians to extract mesh.")

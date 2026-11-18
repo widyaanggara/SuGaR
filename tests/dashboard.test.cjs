@@ -169,6 +169,36 @@ test('2DGS and RaDe-GS queue with their Python environment and appear in results
   assert.match(app.nodes.get('metricsBody').innerHTML, /RaDe-GS/);
 });
 
+test('settings panel queues SuGaR optimization only for models with a finished baseline', async () => {
+  const app = page();
+  app.setModel('Dewi', 'model_01', {'3dgs_7k': true, sugar_obj: true});
+  app.setModel('Dewa', 'model_01', {'3dgs_7k': true, sugar_obj: false});
+  for (const [id, value] of Object.entries({qualityGaussians: '3', qualityIterations: '15000',
+    qualityPoissonDepth: '10', qualityForeground: '0', qualityBackground: '1000000',
+    qualityStatueFocus: 'on', qualityStatuePoissonDepth: '11'})) app.nodes.get(id).value = value;
+  await app.events.DOMContentLoaded();
+  await vm.runInContext('refreshStatus(false)', app.context);
+  const options = app.nodes.get('qualityTarget').innerHTML;
+  assert.match(options, /Dewi\/model_01/);
+  assert.doesNotMatch(options, /Dewa\/model_01/);
+  assert.equal(app.nodes.get('qualityTarget').value, 'Dewi/model_01');
+  assert.equal(app.nodes.get('btnQueueSugarQuality').disabled, false);
+  await vm.runInContext('queueSugarQuality()', app.context);
+  const body = app.calls.filter(([url]) => url === '/api/run').at(-1)[1];
+  assert.equal(body.action, 'sugar_quality');
+  assert.equal(body.class_name, 'Dewi');
+  assert.equal(body.model_id, 'model_01');
+  assert.deepEqual({...body.sugar_quality}, {gaussians_per_triangle: 3, refinement_iterations: 15000,
+    poisson_depth: 10, foreground_triangles: 0, background_triangles: 1000000,
+    statue_focus: true, statue_poisson_depth: 11});
+  assert.match(app.nodes.get('qualityStatus').textContent, /masuk antrean/);
+  app.nodes.get('qualityForeground').value = '-5';
+  const before = app.calls.length;
+  await vm.runInContext('queueSugarQuality()', app.context);
+  assert.equal(app.calls.filter(([url], i) => i >= before && url === '/api/run').length, 0);
+  assert.match(app.nodes.get('qualityStatus').textContent, /Target segitiga/);
+});
+
 test('experimental SuGaR profile and export controls are included in Train All settings', async () => {
   const app = page();
   await app.events.DOMContentLoaded();

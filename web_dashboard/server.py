@@ -190,6 +190,19 @@ def build_command(job, root=PROJECT_ROOT):
             str(root / "outputs/3dgs" / cls / mdl), *common, *gpu,
             *sugar_arguments(job), '--mesh_export', job.get('sugar_mesh_export', 'obj'),
             *object_arguments(job.get('object_region'))]
+    elif action == 'sugar_quality':
+        from pipeline_tools.optimize_sugar import job_settings, output_name
+        quality = job_settings(job.get('sugar_quality'))
+        output = root / 'outputs/quality/sugar' / cls / mdl / output_name(quality)
+        # Resolution, split and regularization are inherited from the baseline run, never from the form.
+        return [sys.executable, '-u', str(root / 'pipeline_tools/optimize_sugar.py'), *common, *gpu,
+                '--gaussians_per_triangle', str(quality['gaussians_per_triangle']),
+                '--refinement_iterations', str(quality['refinement_iterations']),
+                '--foreground_triangles', str(quality['foreground_triangles']),
+                '--background_triangles', str(quality['background_triangles']),
+                '--poisson_depth', str(quality['poisson_depth']),
+                '--statue_focus' if quality['statue_focus'] else '--no-statue_focus',
+                '--statue_poisson_depth', str(quality['statue_poisson_depth']), '--output_dir', str(output)]
     elif action == "evaluate_visual":
         script, args = "06_evaluate_rendering.py", [*common, *gpu, "--method", job["evaluation_method"]]
     elif action == "evaluate":
@@ -243,8 +256,12 @@ def prepare_jobs(data, root=PROJECT_ROOT):
             raise ValueError('Downscale Scaffold harus 1, 2, 4, atau 8.')
         scaffold = dict(scaffold_repo=str(Path(repo).resolve()), scaffold_python=python,
                         scaffold_iterations=iterations, scaffold_resolution=resolution)
-    if action not in {"full_pipeline", "extract_frames", "colmap", "3dgs", "sugar", "2dgs", "radegs", "evaluate", "evaluate_visual"}:
+    if action not in {"full_pipeline", "extract_frames", "colmap", "3dgs", "sugar", "sugar_quality", "2dgs", "radegs", "evaluate", "evaluate_visual"}:
         raise ValueError("Tahap pipeline tidak dikenal.")
+    quality = None
+    if action == 'sugar_quality':
+        from pipeline_tools.optimize_sugar import job_settings
+        quality = job_settings(data.get('sugar_quality'))
     pipeline_start = data.get('pipeline_start', 'auto')
     if not isinstance(pipeline_start, str) or pipeline_start not in ('auto', 'existing_colmap'):
         raise ValueError('Awal pipeline harus auto atau existing_colmap.')
@@ -348,6 +365,10 @@ def prepare_jobs(data, root=PROJECT_ROOT):
             raise ValueError('Penyelarasan otomatis tidak dapat digabungkan dengan --no_icp.')
         for current_method in methods:
             reason = ''
+            if action == 'sugar_quality' and not (
+                    has_checkpoint(Path(root) / 'outputs/3dgs' / cls / mdl, 7000)
+                    and has_sugar_result(Path(root) / 'outputs/sugar' / cls / mdl)):
+                reason = 'hasil SuGaR baseline (coarse) dan checkpoint 3DGS 7k diperlukan'
             if action == 'evaluate':
                 if not nonempty_file(Path(root) / 'datasets' / cls / mdl / 'ground_truth/lidar.ply'):
                     reason = 'ground_truth/lidar.ply belum tersedia'
@@ -372,6 +393,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                              radegs_profile=radegs_profile, visual_protocol='shared',
                              radegs_mesh_backend=radegs_mesh_backend,
                              sugar_mesh_export=mesh_export, sugar_diagnostics=diagnostics,
+                             **({'sugar_quality': quality} if quality else {}),
                              object_region={'mode': 'camera_focus_v1'},
                              experiment=experiment, **scaffold,
                              pipeline_start=pipeline_start,

@@ -55,6 +55,22 @@ def clean_mesh(mesh, region, o3d):
     return cropped
 
 
+def statue_submesh(mesh, split, o3d):
+    """Keep the statue part of a merged statue+background mesh (statue first, order preserved)."""
+    import numpy as np
+    vertices, triangles = np.asarray(mesh.vertices), np.asarray(mesh.triangles)
+    n_vertices, n_triangles = split['statue_vertices'], split['statue_triangles']
+    if (len(vertices), len(triangles)) != (split['total_vertices'], split['total_triangles']):
+        raise ValueError('Jumlah vertex/segitiga refined tidak cocok dengan statue_split.json.')
+    statue = triangles[:n_triangles]
+    if not n_triangles or statue.max() >= n_vertices:
+        raise ValueError('Bagian patung pada mesh refined tidak valid.')
+    result = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(vertices[:n_vertices]),
+                                       o3d.utility.Vector3iVector(statue))
+    result.remove_unreferenced_vertices()
+    return result
+
+
 def export_object(root, cls, mdl, method, experiment, region, output_override=None):
     region = validate_region(region)
     if region is None:
@@ -80,6 +96,14 @@ def export_object(root, cls, mdl, method, experiment, region, output_override=No
     target, receipt = folder / 'object.ply', folder / 'region.json'
     identity = {'version': 1, 'region': region, 'source': str(source),
                 'source_signature': file_signature(source)}
+    statue_file, split_file = output / 'mesh/statue_region.npz', output / 'mesh/statue_split.json'
+    statue_region = method == 'sugar' and statue_file.is_file()
+    statue_split = method == 'sugar' and split_file.is_file()
+    if statue_region:
+        # The statue region from mesh extraction (ground and neighbours removed) replaces the box crop.
+        identity['statue_region_signature'] = file_signature(statue_file)
+    if statue_split:
+        identity['statue_split_signature'] = file_signature(split_file)
     if automatic:
         identity['cameras'] = str(camera_path)
         identity['camera_signature'] = file_signature(camera_path)
@@ -95,6 +119,15 @@ def export_object(root, cls, mdl, method, experiment, region, output_override=No
         from pipeline_tools.sugar_focus import camera_focus_region
         effective_region = camera_focus_region(json.loads(camera_path.read_text(encoding='utf-8')))
         print(f'[OBJECT] Fokus otomatis SuGaR: {effective_region}', flush=True)
+    if statue_split:
+        # Exact statue: the first triangles of the refined mesh are the statue Poisson mesh.
+        mesh = statue_submesh(mesh, json.loads(split_file.read_text(encoding='utf-8')), o3d)
+        effective_region = dict(effective_region, statue_split=str(split_file))
+    elif statue_region:
+        import numpy as np
+        from sugar_utils.statue_focus import load_region, region_contains
+        mesh.remove_vertices_by_mask(~region_contains(load_region(statue_file), np.asarray(mesh.vertices)))
+        effective_region = dict(effective_region, statue_region=str(statue_file))
     result = clean_mesh(mesh, effective_region, o3d)
     folder.mkdir(parents=True, exist_ok=True)
     temporary = folder / 'object.tmp.ply'

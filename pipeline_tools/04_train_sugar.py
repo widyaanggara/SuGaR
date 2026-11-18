@@ -114,7 +114,8 @@ def train_sugar_pipeline(scene_path: str,
         'code': code_identity(PROJECT_ROOT, ['sugar_trainers/coarse_density.py',
             'sugar_trainers/coarse_density_and_dn_consistency.py', 'sugar_trainers/coarse_sdf.py',
             'sugar_trainers/refine.py', 'sugar_scene/sugar_model.py', 'sugar_scene/sugar_optimizer.py',
-            'sugar_utils/training_recovery.py', 'sugar_extractors/coarse_mesh.py', 'sugar_extractors/refined_mesh.py'])}, resume)
+            'sugar_utils/training_recovery.py', 'sugar_utils/mesh_budget.py',
+            'sugar_extractors/coarse_mesh.py', 'sugar_extractors/refined_mesh.py'])}, resume)
     journal = StageJournal(output_dir / 'recovery/stages' / fingerprint(identity), identity,
                            enabled=resume, log=logger.log if logger else print)
     def recovery_options(stage, inputs):
@@ -202,6 +203,15 @@ def train_sugar_pipeline(scene_path: str,
             bboxmin=str(tuple(region['min'])), bboxmax=str(tuple(region['max'])),
             center_bbox=False, poisson_depth=quality_options['poisson_depth'],
             save_predecimation=True)
+        coarse_mesh_args.update(
+            foreground_triangle_target=quality_options.get('foreground_triangle_target', n_vertices),
+            background_triangle_target=quality_options.get('background_triangle_target', n_vertices),
+            project_mesh_on_surface_points=quality_options.get('project_mesh_on_surface_points', True),
+            statue_focus=quality_options.get('statue_focus', False),
+            statue_up=quality_options.get('up'),
+            statue_poisson_depth=quality_options.get('statue_poisson_depth', quality_options['poisson_depth']))
+        if coarse_mesh_args.statue_focus and coarse_mesh_args.statue_up is None:
+            raise ValueError('Fokus patung memerlukan arah atas kamera (up).')
     mesh_inputs = {'coarse': file_signature(Path(coarse_sugar_path))}
     coarse_mesh_path = journal.get('mesh', mesh_inputs)
     if coarse_mesh_path is None:
@@ -215,6 +225,20 @@ def train_sugar_pipeline(scene_path: str,
     torch.cuda.empty_cache()
 
     # ==================== 3. Refine SuGaR ====================
+    if quality_options:
+        import open3d as o3d
+        mesh_info = o3d.io.read_triangle_mesh(str(coarse_mesh_path))
+        counts = dict(vertices=len(mesh_info.vertices), triangles=len(mesh_info.triangles))
+        counts['gaussians'] = counts['triangles'] * gaussians_per_triangle
+        split_path = mesh_dir / 'statue_split.json'
+        if split_path.is_file():
+            split = json.loads(split_path.read_text(encoding='utf-8'))
+            counts.update(statue_triangles=split['statue_triangles'],
+                          background_triangles=counts['triangles'] - split['statue_triangles'])
+        print(f'[QUALITY] Mesh used for refinement: {counts}', flush=True)
+        from pipeline_tools.recovery_state import atomic_json
+        atomic_json(output_dir / 'refinement_geometry.json', counts)
+        del mesh_info
     if logger:
         logger.start_stage("SuGaR_03_Refinement")
 

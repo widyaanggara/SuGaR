@@ -95,7 +95,8 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 const fmtN = value => Number.isFinite(parseFloat(value)) ? parseFloat(value).toFixed(4) : '-';
 const fmtSec = seconds => [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, Math.floor(seconds) % 60].map(n => String(n).padStart(2, '0')).join(':');
 const actionLabel = action => ({full_pipeline: 'Pipeline lengkap', colmap: 'Rekonstruksi COLMAP',
-  '2dgs': '2DGS + evaluasi', radegs: 'RaDe-GS + evaluasi', '3dgs': 'Training 3DGS', sugar: 'Training SuGaR', extract_frames: 'Ekstraksi frame',
+  '2dgs': '2DGS + evaluasi', radegs: 'RaDe-GS + evaluasi', '3dgs': 'Training 3DGS', sugar: 'Training SuGaR',
+  sugar_quality: 'Optimasi SuGaR', extract_frames: 'Ekstraksi frame',
   evaluate_visual: 'Evaluasi visual', evaluate: 'Evaluasi geometri'}[action] || action || '');
 const settingsTabs = ['resolution', 'colmap', 'training', 'lidar'];
 const isFilePreview = window.location?.protocol === 'file:' || window.location?.search === '?preview=1';
@@ -210,7 +211,9 @@ async function api(path, data) {
 const settingControls = ['gpuId', 'refinementTime', 'meshTriangles', 'resumeCompleted',
   'colmapMaxImageSize', 'imageDownscale', 'imageMaxSize', 'colmapDevice', 'colmapMatcher',
   'colmapMaxFeatures', 'colmapSequentialOverlap', 'sourceWidth', 'sourceHeight',
-  'gaussiansPerTriangle', 'regularization', 'evaluationMethod', 'sugarMeshExport', 'sugarDiagnostics'];
+  'gaussiansPerTriangle', 'regularization', 'evaluationMethod', 'sugarMeshExport', 'sugarDiagnostics',
+  'qualityGaussians', 'qualityIterations', 'qualityPoissonDepth', 'qualityForeground', 'qualityBackground',
+  'qualityStatueFocus', 'qualityStatuePoissonDepth'];
 let presets = {};
 const sugarControlIds = {vertices: 'meshTriangles', gaussians_per_triangle: 'gaussiansPerTriangle',
   refinement_time: 'refinementTime', regularization: 'regularization'};
@@ -303,6 +306,55 @@ function initializeSettings() {
   updateSettings(false);
 }
 
+let qualitySubmitting = false;
+
+function renderQualityTargets() {
+  const select = $('qualityTarget');
+  const previous = select.value;
+  const ready = Object.entries(cachedStatus).flatMap(([cls, models]) => Object.entries(models)
+    .filter(([, info]) => info.sugar_obj && info['3dgs_7k']).map(([mdl]) => [cls, mdl]));
+  select.innerHTML = ready.length ? ready.map(([cls, mdl]) =>
+    `<option value="${esc(cls + '/' + mdl)}">${esc(modelName(cls, mdl))} · ${esc(cls)}/${esc(mdl)}</option>`).join('')
+    : '<option value="">Belum ada hasil SuGaR baseline</option>';
+  if (ready.some(([cls, mdl]) => cls + '/' + mdl === previous)) select.value = previous;
+  else select.value = ready.length ? ready[0].join('/') : '';
+  $('btnQueueSugarQuality').disabled = isFilePreview || qualitySubmitting || !ready.length;
+}
+
+function readQualitySettings() {
+  const values = {gaussians_per_triangle: Number($('qualityGaussians').value),
+    refinement_iterations: Number($('qualityIterations').value),
+    poisson_depth: Number($('qualityPoissonDepth').value),
+    foreground_triangles: Number($('qualityForeground').value),
+    background_triangles: Number($('qualityBackground').value),
+    statue_focus: $('qualityStatueFocus').value === 'on',
+    statue_poisson_depth: Number($('qualityStatuePoissonDepth').value)};
+  for (const key of ['foreground_triangles', 'background_triangles']) {
+    if (!Number.isInteger(values[key]) || values[key] < 0 || values[key] > 20000000)
+      throw new Error('Target segitiga harus bilangan bulat 0 sampai 20.000.000 (0 = tanpa decimation).');
+  }
+  return values;
+}
+
+async function queueSugarQuality() {
+  if (qualitySubmitting) return;
+  const [cls, mdl] = $('qualityTarget').value.split('/');
+  if (!cls || !mdl) { $('qualityStatus').textContent = 'Pilih patung dengan hasil SuGaR baseline lengkap.'; return; }
+  qualitySubmitting = true;
+  $('btnQueueSugarQuality').disabled = true;
+  try {
+    const result = await api('/api/run', {...readExperimentSettings(), action: 'sugar_quality',
+      class_name: cls, model_id: mdl, evaluation_method: 'SuGaR', sugar_quality: readQualitySettings()});
+    const message = result.added.length ? `Optimasi SuGaR ${cls}/${mdl} masuk antrean.`
+      : result.duplicates.length ? `Optimasi SuGaR ${cls}/${mdl} sudah ada di antrean.`
+      : ((result.skipped || []).join('\n') || 'Pekerjaan tidak dapat ditambahkan.');
+    $('qualityStatus').textContent = message;
+    showToast(message);
+    await pollLogs();
+  } catch (error) { $('qualityStatus').textContent = error.message; }
+  finally { qualitySubmitting = false; renderQualityTargets(); }
+}
+
 async function checkColmap() {
   $('btnCheckColmap').disabled = true;
   $('colmapCapability').textContent = 'Memeriksa build COLMAP server...';
@@ -322,6 +374,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       .map(cls => [cls, Object.fromEntries((cls === 'TanksAndTemples' ? ['tanks_and_temples_1', 'tanks_and_temples_2'] : ['model_01', 'model_02'])
         .map(mdl => [mdl, {images_count: 0, input_path: `datasets/${cls}/${mdl}/input/`, output_path: `outputs/{3dgs,sugar}/${cls}/${mdl}/`}]))]));
     initializeSettings();
+    renderQualityTargets();
     $('previewNotice').hidden = false;
     $('previewNotice').textContent = previewMessage;
     $('settingsPreset').disabled = true;
@@ -381,6 +434,7 @@ async function refreshStatus(feedback) {
   try {
     cachedStatus = await api('/api/status');
     renderGrid(cachedStatus);
+    renderQualityTargets();
     renderMetrics();
     const entries = Object.values(cachedStatus).flatMap(models => Object.values(models));
     const done = entries.filter(info => info.overall_status === 'Completed').length;

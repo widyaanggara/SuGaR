@@ -25,7 +25,49 @@ def module(name):
     return result
 
 
-def prepare(source, destination, scene, baseline, gaussians=3, poisson_depth=10):
+# Pure SuGaR: every Gaussian stays bound to the mesh. Background blur is reduced only through
+# SuGaR's own capacity: a finer background Poisson mesh, more triangles and more Gaussians per triangle.
+QUALITY_DEFAULTS = dict(gaussians_per_triangle=3, refinement_iterations=15000,
+                        foreground_triangles=0, background_triangles=2000000, poisson_depth=11,
+                        statue_focus=True, statue_poisson_depth=11)
+
+
+def job_settings(raw=None):
+    """Validate dashboard/CLI values with one set of limits."""
+    if raw is not None and not isinstance(raw, dict):
+        raise ValueError('Pengaturan optimasi SuGaR harus berupa objek.')
+    unknown = set(raw or {}) - set(QUALITY_DEFAULTS)
+    if unknown:
+        raise ValueError('Pengaturan optimasi SuGaR tidak dikenal: ' + ', '.join(sorted(unknown)))
+    result = {**QUALITY_DEFAULTS, **(raw or {})}
+    integers = ('gaussians_per_triangle', 'refinement_iterations', 'foreground_triangles',
+                'background_triangles', 'poisson_depth', 'statue_poisson_depth')
+    if any(isinstance(result[k], bool) or not isinstance(result[k], int) for k in integers):
+        raise ValueError('Pengaturan optimasi SuGaR harus bilangan bulat.')
+    if result['gaussians_per_triangle'] not in (1, 3, 4, 6):
+        raise ValueError('Gaussian per segitiga harus 1, 3, 4, atau 6.')
+    if result['refinement_iterations'] not in (2000, 7000, 15000):
+        raise ValueError('Iterasi refinement harus 2000, 7000, atau 15000.')
+    if not 6 <= result['poisson_depth'] <= 12 or not 6 <= result['statue_poisson_depth'] <= 12:
+        raise ValueError('Poisson depth harus 6 sampai 12.')
+    for key in ('foreground_triangles', 'background_triangles'):
+        if not 0 <= result[key] <= 20000000:
+            raise ValueError('Target segitiga harus 0 (tanpa decimation) sampai 20.000.000.')
+    if not isinstance(result['statue_focus'], bool):
+        raise ValueError('Fokus patung harus boolean.')
+    return result
+
+
+def output_name(settings):
+    """Each configuration gets its own folder, so changing values never collides with an old plan."""
+    statue = 's%d' % settings['statue_poisson_depth'] if settings['statue_focus'] else 'snone'
+    return ('g{gaussians_per_triangle}_it{refinement_iterations}_fg{foreground_triangles}'
+            '_bg{background_triangles}_d{poisson_depth}_{statue}').format(statue=statue, **settings)
+
+
+def prepare(source, destination, scene, baseline, gaussians=3, poisson_depth=11,
+            foreground_triangles=0, background_triangles=2000000, refinement_iterations=15000,
+            statue_focus=True, statue_poisson_depth=11):
     """Validate reuse before any training or mutation of an existing result."""
     source, destination, scene, baseline = map(lambda p: Path(p).resolve(),
                                                (source, destination, scene, baseline))
@@ -34,6 +76,15 @@ def prepare(source, destination, scene, baseline, gaussians=3, poisson_depth=10)
             raise ValueError('Output optimasi harus terpisah dari hasil sumber dan dataset.')
     if gaussians not in (1, 3, 4, 6) or not 6 <= poisson_depth <= 12:
         raise ValueError('Gaussian/segitiga atau depth Poisson tidak valid.')
+    if refinement_iterations not in (2000, 7000, 15000):
+        raise ValueError('Iterasi refinement harus 2000, 7000, atau 15000.')
+    if any(isinstance(n, bool) or not isinstance(n, int) or n < 0
+           for n in (foreground_triangles, background_triangles)):
+        raise ValueError('Target segitiga harus integer >= 0; 0 mempertahankan resolusi asli.')
+    options = job_settings(dict(
+        gaussians_per_triangle=gaussians, refinement_iterations=refinement_iterations,
+        foreground_triangles=foreground_triangles, background_triangles=background_triangles,
+        poisson_depth=poisson_depth, statue_focus=statue_focus, statue_poisson_depth=statue_poisson_depth))
     manifest = json.loads((source / 'pipeline_result.json').read_text(encoding='utf-8'))
     if Path(manifest['scene_path']).resolve() != scene:
         raise ValueError('Dataset sumber berbeda dari target.')
@@ -47,7 +98,9 @@ def prepare(source, destination, scene, baseline, gaussians=3, poisson_depth=10)
                             manifest['white_background'], use_recorded_initialization=True):
         raise ValueError('Dataset atau protokol training baseline berubah.')
     from pipeline_tools.sugar_focus import camera_focus_region
-    region = camera_focus_region(json.loads((baseline / 'cameras.json').read_text(encoding='utf-8')))
+    from sugar_utils.statue_focus import camera_up
+    cameras = json.loads((baseline / 'cameras.json').read_text(encoding='utf-8'))
+    region = camera_focus_region(cameras)
     plan = dict(source=str(source), coarse_checkpoint=str(coarse),
                 coarse_signature=file_signature(coarse), baseline_signature=signature,
                 scene=scene_identity(scene),
@@ -55,9 +108,16 @@ def prepare(source, destination, scene, baseline, gaussians=3, poisson_depth=10)
                 settings={key: manifest[key] for key in (
                     'regularization', 'decimation_target', 'refinement_iterations',
                     'white_background', 'image_downscale', 'image_max_size')},
-                gaussians_per_triangle=gaussians, region=region, poisson_depth=poisson_depth)
-    if plan['settings']['refinement_iterations'] not in (2000, 7000, 15000):
-        raise ValueError('Jumlah iterasi sumber tidak didukung.')
+                gaussians_per_triangle=gaussians, region=region, poisson_depth=poisson_depth,
+                foreground_triangle_target=foreground_triangles,
+                background_triangle_target=background_triangles,
+                project_mesh_on_surface_points=False,
+                source_refinement_iterations=manifest['refinement_iterations'],
+                statue_focus=options['statue_focus'],
+                statue_poisson_depth=options['statue_poisson_depth'],
+                up=camera_up([c['rotation'] for c in cameras]).tolist())
+    # Refinement length is an explicit choice, not inherited from the (often short) baseline run.
+    plan['settings']['refinement_iterations'] = refinement_iterations
     receipt = destination / 'optimization_plan.json'
     if receipt.exists():
         if json.loads(receipt.read_text(encoding='utf-8')) != plan:
@@ -96,7 +156,10 @@ def train_worker(args, plan, scene, baseline, output):
             export_obj=False, gpu=args.gpu, white_background=settings['white_background'], logger=logger,
             image_downscale=settings['image_downscale'], image_max_size=settings['image_max_size'],
             reuse_coarse=plan['coarse_checkpoint'],
-            quality_options=dict(region=plan['region'], poisson_depth=plan['poisson_depth']))
+            quality_options={key: plan[key] for key in (
+                'region', 'poisson_depth', 'foreground_triangle_target',
+                'background_triangle_target', 'project_mesh_on_surface_points',
+                'statue_focus', 'statue_poisson_depth', 'up')})
         from pipeline_tools.object_mesh import export_object
         export_object(ROOT, args.statue_class, args.model_id, 'sugar', 'baseline',
                       plan['region'], output_override=output)
@@ -113,7 +176,17 @@ def main():
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--output_dir', type=Path)
     parser.add_argument('--gaussians_per_triangle', type=int, choices=(1, 3, 4, 6), default=3)
-    parser.add_argument('--poisson_depth', type=int, choices=range(6, 13), default=10)
+    parser.add_argument('--poisson_depth', type=int, choices=range(6, 13), default=11,
+                        help='Depth Poisson background (dan patung bila fokus patung nonaktif).')
+    parser.add_argument('--foreground_triangles', type=int, default=0,
+                        help='Batas segitiga area patung; default 0: tanpa decimation.')
+    parser.add_argument('--background_triangles', type=int, default=2000000,
+                        help='Batas segitiga background; 0: tanpa decimation.')
+    parser.add_argument('--refinement_iterations', type=int, choices=(2000, 7000, 15000), default=15000,
+                        help='Iterasi refinement; default 15000 (default upstream SuGaR).')
+    parser.add_argument('--statue_focus', action=argparse.BooleanOptionalAction, default=True,
+                        help='Mesh hanya patung: buang bidang tanah dan objek tetangga sebelum Poisson.')
+    parser.add_argument('--statue_poisson_depth', type=int, choices=range(6, 13), default=11)
     parser.add_argument('--plan_only', action='store_true')
     parser.add_argument('--train_worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -130,7 +203,9 @@ def main():
                      scene, baseline, output)
         return
     with gpu_lock(args.gpu):
-        plan = prepare(source, output, scene, baseline, args.gaussians_per_triangle, args.poisson_depth)
+        plan = prepare(source, output, scene, baseline, args.gaussians_per_triangle, args.poisson_depth,
+                       args.foreground_triangles, args.background_triangles, args.refinement_iterations,
+                       args.statue_focus, args.statue_poisson_depth)
         print(json.dumps(plan, indent=2), flush=True)
         if args.plan_only:
             return

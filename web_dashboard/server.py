@@ -24,7 +24,7 @@ from pipeline_tools.object_mesh import object_status
 from pipeline_tools.external_methods import METHODS as EXTERNAL_METHODS, trained, visual_metrics, output_base
 from web_dashboard.metrics_export import build_excel
 from pipeline_tools.run_settings import (resolution_settings, colmap_settings, colmap_arguments,
-    sugar_settings, sugar_arguments, research_presets, SUGAR_RESEARCH_SETTINGS)
+    sugar_settings, sugar_arguments, research_presets)
 from pipeline_tools.colmap_capabilities import inspect_colmap
 from pipeline_tools.model_names import read_model_names, model_display_name, save_model_name
 from pipeline_tools.geometry_config import (read_geometry_scales, save_geometry_scales, positive_scale,
@@ -244,8 +244,6 @@ def build_command(job, root=PROJECT_ROOT):
 def prepare_jobs(data, root=PROJECT_ROOT):
     if not isinstance(data, dict):
         raise ValueError("Body harus berupa objek JSON.")
-    # SuGaR parameters are fixed in code for the thesis; values sent by the browser are ignored.
-    data = {**data, **SUGAR_RESEARCH_SETTINGS}
     action = data.get("action", "full_pipeline")
     experiment = data.get('experiment', 'baseline')
     if experiment not in ('baseline', 'scaffold_anchor'):

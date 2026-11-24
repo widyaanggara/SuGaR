@@ -313,7 +313,7 @@ def run(args):
             if stage == 'Ekstraksi_Mesh' and not mesh_path(output, args.method).is_file():
                 raise RuntimeError('Ekstraksi tidak menghasilkan mesh.')
             if stage == 'Ekstraksi_Mesh':
-                if file_signature(mesh_result) == mesh_before:
+                if dict(file_signature(mesh_result)) == dict(mesh_before or {}):  # exact: detects a rewrite
                     raise RuntimeError('Ekstraksi tidak memperbarui mesh; hasil lama tidak dianggap sukses.')
                 previous_run['mesh_backend'] = mesh_backend
                 previous_run['mesh_checkpoint'] = file_signature(checkpoint(output))

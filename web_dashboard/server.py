@@ -495,6 +495,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
         except ValueError as exc:
             self.send_json({"error": str(exc)}, 400)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
         except OSError:
             self.send_json({"error": "File dashboard tidak dapat dibaca. Periksa izin dan ruang penyimpanan server."}, 500)
 
@@ -558,6 +560,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
         except (ValueError, TypeError, UnicodeError) as exc:
             self.send_json({"error": str(exc)}, 400)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
         except OSError:
             self.send_json({"error": "Perubahan tidak dapat disimpan. Periksa izin dan ruang penyimpanan server."}, 500)
 
@@ -619,12 +623,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def send_json(self, data, status=200):
         payload = json.dumps(data).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Browser navigation/cancellation is not a disk error. Never attempt
+            # another HTTP response on a connection that has already closed.
+            self.close_connection = True
 
     def log_message(self, format, *args):
         pass

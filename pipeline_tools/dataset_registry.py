@@ -37,9 +37,33 @@ def has_checkpoint(output, iteration):
     return ply.is_file() and ply.stat().st_size > 0 and (output / "cameras.json").is_file()
 
 
+class FileSignature(dict):
+    """Size + mtime, equal to a stored signature when size and whole seconds match.
+
+    Outputs copied to a 9p/drvfs mount (WSL /mnt/<drive>) keep only whole-second mtimes,
+    so records written on ext4 (nanoseconds) must still match the copied files. Being a
+    dict subclass, Python uses this __eq__ even when the plain JSON dict is on the left,
+    including inside nested identity/context dicts. JSON output is unchanged.
+    """
+    @staticmethod
+    def _key(value):
+        return value.get("size"), value.get("mtime_ns") // 1_000_000_000
+
+    def __eq__(self, other):
+        if isinstance(other, dict) and set(other) == {"size", "mtime_ns"}                 and isinstance(other.get("mtime_ns"), int):
+            return self._key(self) == self._key(other)
+        return NotImplemented if not isinstance(other, dict) else False
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        return result if result is NotImplemented else not result
+
+    __hash__ = None
+
+
 def file_signature(path):
     stat = Path(path).stat()
-    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    return FileSignature(size=stat.st_size, mtime_ns=stat.st_mtime_ns)
 
 
 def has_sugar_result(output, baseline=None):

@@ -6,6 +6,7 @@ let selectedLogId = null;
 let selectedLogRequest = 0;
 let selectedLogLoading = false;
 let heldLogElement = null;
+let liveLogLines = [];
 document.addEventListener('pointerup', () => { heldLogElement = null; });
 document.addEventListener('pointercancel', () => { heldLogElement = null; });
 
@@ -22,6 +23,13 @@ let lastQueueSignature = null;
 let lastGridSignature = null;
 let cachedMetrics = [];
 let metricExperiment = 'baseline';
+// Methods shown in the results summary and table; any combination, remembered per browser.
+const METRIC_METHOD_ORDER = ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'];
+let selectedMetricMethods = new Set(METRIC_METHOD_ORDER);
+try {
+  const saved = JSON.parse(window.localStorage?.getItem('metric-methods-v1') || 'null');
+  if (Array.isArray(saved)) selectedMetricMethods = new Set(saved.filter(method => METRIC_METHOD_ORDER.includes(method)));
+} catch (_) { /* Blocked storage: show every method. */ }
 const metricMethods = {baseline: ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'], scaffold_anchor: ['3DGS_scaffold_anchor', 'SuGaR_scaffold_anchor', '2DGS_scaffold_anchor', 'RaDe-GS_scaffold_anchor']};
 let editingModel = null;
 let modelNameSaving = false;
@@ -245,8 +253,6 @@ function renderSettingsSummary() {
   $('summaryColmap').textContent = device && validSize(values.colmap_max_image_size) ? `${device} / maks. ${values.colmap_max_image_size} px` : 'Periksa pengaturan COLMAP';
   $('summaryTraining').textContent = [1, 2, 4, 8].includes(values.image_downscale) && (values.image_max_size === 0 || validSize(values.image_max_size)) ?
     `${values.image_downscale}× / ${values.image_max_size ? 'maks. ' + values.image_max_size + ' px' : 'tanpa batas tambahan'}` : 'Periksa resolusi training';
-  const refinement = {short: '2.000', medium: '7.000', long: '15.000'}[values.refinement_time];
-  $('summaryRefinement').textContent = refinement ? `${refinement} iterasi` : 'Pilih refinement';
 }
 
 function applyPreset(name) {
@@ -257,10 +263,25 @@ function applyPreset(name) {
   updateSettings(false);
 }
 
+// The values actually sent with new jobs, shown compactly under the preset description.
+function renderPresetChips() {
+  const box = $('presetChips');
+  if (!box) return;
+  const iterations = {short: '2.000', medium: '7.000', long: '15.000'}[$('refinementTime').value] || $('refinementTime').value;
+  const chips = [
+    ['Mesh', Number($('meshTriangles').value).toLocaleString('id-ID')],
+    ['Gaussian/segitiga', $('gaussiansPerTriangle').value],
+    ['Refinement', iterations + ' iterasi'],
+    ['Regularisasi', $('regularization').value]];
+  box.innerHTML = chips.map(([name, value]) => `<span class="preset-chip"><span>${esc(name)}</span>${esc(value)}</span>`).join('')
+    + '<span class="preset-chip preset-chip-accent">Mesh fokus patung</span>';
+}
+
 function updateSettings(custom = true) {
   if (custom) $('settingsPreset').value = 'custom';
   const preset = $('settingsPreset').value;
-  $('presetDescription').textContent = presets[preset]?.description || 'Konfigurasi kustom/tersimpan lama. Parameter ini tidak diklaim sebagai preset resmi. Gunakan konfigurasi yang konsisten untuk eksperimen skripsi.';
+  $('presetDescription').textContent = presets[preset]?.description || 'Pengaturan kustom, tidak diklaim sebagai preset resmi. Pakai nilai yang sama untuk semua patung.';
+  renderPresetChips();
   $('colmapSequentialOverlap').disabled = $('colmapMatcher').value !== 'sequential';
   const width = Number($('sourceWidth').value), height = Number($('sourceHeight').value);
   const downscale = Number($('imageDownscale').value), cap = Number($('imageMaxSize').value);
@@ -425,7 +446,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     for (const cls of ['ALL', ...Object.keys(catalog.classes)]) {
       const button = document.createElement('button');
       button.className = 'filter-pill' + (cls === 'ALL' ? ' active' : '');
-      button.textContent = cls === 'ALL' ? 'Semua' : cls;
+      const count = cls === 'ALL' ? catalog.total_models : catalog.classes[cls].length;
+      button.innerHTML = `${esc(cls === 'ALL' ? 'Semua' : cls === 'TanksAndTemples' ? 'Tanks & Temples' : cls)}<span class="pill-count">${count}</span>`;
+      button.setAttribute('aria-label', `${cls === 'ALL' ? 'Semua kelas' : cls}, ${count} model`);
       button.dataset.filter = cls;
       button.onclick = () => filterClass(cls);
       filters.appendChild(button);
@@ -480,15 +503,17 @@ function renderGrid(data) {
           <div class="pipeline-row"><span><span class="stage-index">02</span>COLMAP</span>${chip(info.colmap_done)}</div>
           <div class="pipeline-row"><span><span class="stage-index">03</span>3DGS</span>${chip(info['3dgs_30k'], '30k iter', info['3dgs_7k'] ? '7k iter' : 'Menunggu')}</div>
           <div class="pipeline-row"><span><span class="stage-index">04</span>SuGaR</span>${chip(info.sugar_obj, 'Refined lengkap', info.sugar_mesh ? 'Mesh kasar' : 'Menunggu')}</div>
-          <div class="pipeline-row"><span>2DGS</span>${chip(info.external_methods?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_methods?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
-          <div class="pipeline-row"><span>RaDe-GS</span>${chip(info.external_methods?.radegs?.evaluated, 'Evaluasi tersedia', info.external_methods?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span><span class="stage-index">05</span>2DGS</span>${chip(info.external_methods?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_methods?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span><span class="stage-index">06</span>RaDe-GS</span>${chip(info.external_methods?.radegs?.evaluated, 'Evaluasi tersedia', info.external_methods?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
+          <div class="pipeline-row"><span><span class="stage-index">07</span>Evaluasi visual</span>${chip(info.evaluated)}</div>
+          <div class="pipeline-row"><span><span class="stage-index">08</span>Evaluasi geometri</span>${chip(info.geometry_evaluated, '2 metode selesai', !info.has_gt_lidar ? 'Perlu LiDAR' : !info.geometry_settings ? 'Atur LiDAR' : 'Menunggu')}</div>
+        </div>
+        <details class="pipeline-extra"><summary>Studi ablasi Scaffold</summary><div class="pipeline-rows">
           <div class="pipeline-row"><span>Ablasi 3DGS</span>${chip(info.ablations?.['3dgs']?.evaluated, 'Evaluasi tersedia', info.ablations?.['3dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>Ablasi SuGaR</span>${chip(info.ablations?.sugar?.evaluated, 'Evaluasi tersedia', info.ablations?.sugar?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>Ablasi 2DGS</span>${chip(info.external_ablations?.['2dgs']?.evaluated, 'Evaluasi tersedia', info.external_ablations?.['2dgs']?.trained ? 'Training selesai' : 'Menunggu')}</div>
           <div class="pipeline-row"><span>Ablasi RaDe-GS</span>${chip(info.external_ablations?.radegs?.evaluated, 'Evaluasi tersedia', info.external_ablations?.radegs?.trained ? 'Training selesai' : 'Menunggu')}</div>
-          <div class="pipeline-row"><span><span class="stage-index">05</span>Evaluasi visual (4 metode)</span>${chip(info.evaluated)}</div>
-          <div class="pipeline-row"><span><span class="stage-index">06</span>Evaluasi geometri</span>${chip(info.geometry_evaluated, '2 metode selesai', !info.has_gt_lidar ? 'Perlu LiDAR' : !info.geometry_settings ? 'Atur LiDAR' : 'Menunggu')}</div>
-        </div>
+        </div></details>
         <details class="dataset-path"><summary>Lihat folder input &amp; output</summary><code>${esc(info.input_path)}</code><code>${esc(info.output_path)}</code><code>${esc(`datasets/${cls}/${mdl}/ground_truth/lidar.ply`)}</code></details>
         <div class="step-buttons">
           <button class="btn btn-primary btn-sm btn-full" onclick="openQueueDialog(${target})">Antrekan model ini</button>
@@ -550,7 +575,7 @@ function changeQueueTarget(classChanged) {
   queueSelection = {class_name: $('queueClass').value, model_id: $('queueModel').value};
   renderQueueTargets();
   const single = !!queueSelection.class_name && !!queueSelection.model_id;
-  chooseQueueAction(!single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(selectedQueueAction)
+  chooseQueueAction(!single && !['full_pipeline', '3dgs', 'sugar', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(selectedQueueAction)
     ? 'full_pipeline' : selectedQueueAction);
 }
 
@@ -603,13 +628,13 @@ function chooseQueueAction(action) {
   if (!queueActions.includes(action) || queueSubmitting || calibrationSaving) return;
   const single = !!queueSelection?.class_name && !!queueSelection?.model_id;
   $('queueProcessOptions').dataset.scope = single ? 'single' : 'bulk';
-  if (!single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(action)) return;
+  if (!single && !['full_pipeline', '3dgs', 'sugar', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(action)) return;
   selectedQueueAction = action;
   for (const name of queueActions) {
     const button = $('queue-action-' + name);
     button.setAttribute('aria-pressed', String(name === action));
-    button.disabled = !single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(name);
-    button.hidden = !single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(name);
+    button.disabled = !single && !['full_pipeline', '3dgs', 'sugar', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(name);
+    button.hidden = !single && !['full_pipeline', '3dgs', 'sugar', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(name);
   }
   $('queue-action-extract_frames').hidden = !single || !selectedModelPairs()[0]?.info.has_video;
   const evaluation = ['evaluate_visual', 'evaluate'].includes(action);
@@ -617,15 +642,15 @@ function chooseQueueAction(action) {
   $('queueGeometryOptions').hidden = action !== 'evaluate';
   $('queuePipelineOptions').hidden = action !== 'full_pipeline';
   $('queueActionHelp').textContent = {
-    full_pipeline: 'Per patung: COLMAP → 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi visual semua metode, baru patung berikutnya. Evaluasi geometri dijalankan terpisah setelah scan LiDAR tersedia.',
-    colmap: 'Menghitung fitur, pencocokan, pose kamera, dan undistorsi dari foto input.',
-    '3dgs': 'Melatih baseline 3DGS dari dataset COLMAP yang sudah tersedia.',
-    '2dgs': 'Training 2DGS 30.000 iterasi, render, mesh, dan evaluasi visual. Jalankan COLMAP dahulu. Checkpoint lengkap dipakai kembali jika Lewati tahap yang selesai aktif.',
-    radegs: 'Training RaDe-GS 30.000 iterasi, render, evaluasi visual, dan mesh. Jalankan COLMAP dahulu. Checkpoint lengkap dipakai kembali jika Lewati tahap yang selesai aktif.',
-    sugar: 'Menjalankan SuGaR menggunakan checkpoint 3DGS 7.000 iterasi yang sudah tersedia.',
-    evaluate_visual: 'Menghitung PSNR, SSIM, dan LPIPS dari checkpoint yang ada. Tidak menjalankan training ulang.',
-    evaluate: 'Menghitung Chamfer, Precision, Recall, dan F1 bersama pada ambang 2 cm dan 5 cm, tanpa training ulang.',
-    extract_frames: 'Mengekstrak frame video ke input. Folder input harus belum berisi foto.'
+    full_pipeline: 'Satu patung diselesaikan dulu sebelum lanjut ke patung berikutnya. Evaluasi geometri dijalankan terpisah.',
+    colmap: 'Fitur, pencocokan, pose kamera, dan undistorsi.',
+    '3dgs': 'Butuh hasil COLMAP.',
+    '2dgs': '30.000 iterasi, render, mesh, dan evaluasi visual. Butuh hasil COLMAP.',
+    radegs: '30.000 iterasi, render, mesh, dan evaluasi visual. Butuh hasil COLMAP.',
+    sugar: 'Butuh checkpoint 3DGS 7.000 iterasi.',
+    evaluate_visual: 'Dari checkpoint yang ada, tanpa training ulang.',
+    evaluate: 'Ambang 2 cm dan 5 cm, tanpa training ulang.',
+    extract_frames: 'Folder input harus masih kosong.'
   }[action];
   $('queueDialogError').textContent = '';
   updateQueuePlan();
@@ -673,7 +698,7 @@ function updateQueuePlan() {
     return text && (!Number.isFinite(Number(text)) || Number(text) <= 0);
   });
   $('queuePlanSummary').textContent = isFilePreview ? 'Pratinjau lokal — tidak mengirim pekerjaan' : invalidScale ? 'Perbaiki skala manual yang tidak valid' : `${ready.length} pekerjaan siap diantrekan`;
-  $('queuePlanNote').textContent = skipped.length ? `${skipped.length} target belum siap dan akan dilewati. Buka rincian untuk melihat yang perlu disiapkan.` : 'Semua target siap. Pekerjaan berjalan bergantian menggunakan pengaturan eksperimen saat ini.';
+  $('queuePlanNote').textContent = skipped.length ? `${skipped.length} target belum siap dan akan dilewati.` : 'Semua target siap.';
   $('queueSkippedDetails').hidden = !skipped.length;
   $('queueSkippedSummary').textContent = `${skipped.length} target yang belum siap`;
   $('queueSkippedList').innerHTML = skipped.map(reason => `<li>${esc(reason)}</li>`).join('');
@@ -691,18 +716,18 @@ function updateQueuePlan() {
   $('queueMethods').disabled = busy;
   for (const id of ['queueScaffoldRepo', 'queueScaffoldPython', 'queueScaffoldIterations', 'queueScaffoldResolution']) $(id).disabled = busy;
   $('queuePipelineHelp').textContent = $('queuePipelineStart').value === 'existing_colmap'
-    ? 'Memakai images/ dan sparse/0 yang sudah ada, termasuk hasil dari komputer lain. Per patung: 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi semua metode. COLMAP tidak dijalankan ulang; target yang belum lengkap dilewati. Pengaturan resolusi training tetap berlaku.'
-    : 'Dengan Lewati tahap yang selesai aktif, setiap model melanjutkan dari hasil terakhir yang tersedia. COLMAP lengkap, termasuk hasil teman, langsung dipakai. Training dan evaluasi yang lengkap serta cocok dilewati; checkpoint parsial yang cocok dipulihkan. Pengaturan COLMAP diterapkan hanya saat membuat COLMAP baru. Untuk interrupted, gunakan Antrekan Ulang agar pengaturan asli dan prioritas pemulihannya dipertahankan.';
+    ? 'COLMAP tidak dijalankan ulang; target tanpa images/ dan sparse/0 dilewati.'
+    : 'COLMAP lengkap, termasuk hasil teman, langsung dipakai. Tahap yang sudah selesai dan cocok dilewati.';
   if ($('queueMethods').value === 'without_sugar') $('queuePipelineHelp').textContent +=
-    ' SuGaR dilewati: urutannya 3DGS → 2DGS → RaDe-GS → evaluasi. Checkpoint 3DGS 7k tetap disimpan, jadi SuGaR dapat dijalankan belakangan dari pipeline lengkap (pilih Semua) atau tombol SuGaR tanpa melatih ulang 3DGS.';
+    ' SuGaR bisa dijalankan belakangan tanpa melatih ulang 3DGS.';
   $('queueApplyIcp').disabled = busy;
-  if (scaffoldSelected) $('queuePipelineHelp').textContent = 'Per patung: COLMAP → Scaffold-GS → anchor bersama → 3DGS → SuGaR → 2DGS → RaDe-GS → evaluasi semua metode. Output ablasi terpisah. Tahap Scaffold yang terputus dimulai ulang; tahap Scaffold yang selesai dan cocok dilewati.';
+  if (scaffoldSelected) $('queuePipelineHelp').textContent = 'COLMAP → Scaffold-GS → anchor bersama → keempat metode. Output ablasi disimpan terpisah.';
   $('queueAlignment').disabled = busy;
   $('queueClass').disabled = busy;
   $('queueModel').disabled = busy || !queueSelection.class_name;
   $('geometryScaleHeading').hidden = !manual;
   $('queueIcpOption').hidden = !manual;
-  $('queueAlignmentNote').textContent = manual ? 'Faktor manual mengubah unit rekonstruksi menjadi meter. Satuan file LiDAR tetap harus dipilih dengan benar.' : 'Tidak perlu memasukkan tinggi atau faktor skala. Sistem mencari penyelarasan, menyimpan transformasi dan model overlay, lalu menghentikan evaluasi jika pemeriksaan numeriknya gagal. Tetap periksa overlay untuk skripsi.';
+  $('queueAlignmentNote').textContent = manual ? 'Faktor manual mengubah unit rekonstruksi ke meter. Satuan LiDAR tetap wajib dipilih.' : 'Skala dicari otomatis dan evaluasi berhenti jika penyelarasan gagal. Tetap periksa overlay.';
   for (const inputs of selectedInputs) {
     inputs.unit.disabled = busy;
     inputs.scale.disabled = busy;
@@ -710,7 +735,7 @@ function updateQueuePlan() {
   }
   const single = !!queueSelection.class_name && !!queueSelection.model_id;
   for (const action of queueActions) $('queue-action-' + action).disabled = busy ||
-    (!single && !['full_pipeline', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(action));
+    (!single && !['full_pipeline', '3dgs', 'sugar', '2dgs', 'radegs', 'evaluate_visual', 'evaluate'].includes(action));
 }
 
 async function persistQueueCalibration() {
@@ -926,6 +951,8 @@ function closeJobLogs() { selectedLogId = null; selectedLogRequest++; selectedLo
 function showLiveLogs() { closeJobLogs(); $('termLabel').textContent = 'output'; pollLogs(); }
 
 function renderLogs(logs) {
+  liveLogLines = logs;
+  renderLiveLogFullscreen();
   if (logSelectionActive($('termBody'))) return;
   $('termBody').innerHTML = '';
   for (const line of logs) {
@@ -937,6 +964,25 @@ function renderLogs(logs) {
   if ($('chkScroll').checked) $('termBody').scrollTop = $('termBody').scrollHeight;
 }
 function clearTerm() { $('termBody').textContent = ''; }
+
+// Popup of the live process log; refreshed by the regular queue polling.
+function openLiveLogFullscreen() {
+  const dialog = $('liveLogDialog');
+  if (!dialog.open) dialog.showModal();
+  renderLiveLogFullscreen(true);
+}
+function closeLiveLogFullscreen() { if ($('liveLogDialog').open) $('liveLogDialog').close(); }
+function liveLogFullscreenClosed() { heldLogElement = null; }
+function renderLiveLogFullscreen(force = false) {
+  const dialog = $('liveLogDialog');
+  if (!dialog?.open) return;
+  const content = $('liveLogContent');
+  if (!force && logSelectionActive(content)) return;
+  content.textContent = liveLogLines.length ? liveLogLines.join('\n') : 'Belum ada log.';
+  const target = $('jobTarget').textContent;
+  $('liveLogStatus').textContent = `${$('termStatus').textContent || 'idle'}${target ? ' · ' + target : ''} · ${liveLogLines.length} baris terakhir`;
+  if ($('liveLogFollow').checked) content.scrollTop = content.scrollHeight;
+}
 async function copyLogs(elementId = 'termBody') {
   const content = $(elementId);
   const text = content.innerText ?? content.textContent;
@@ -950,7 +996,7 @@ async function copyLogs(elementId = 'termBody') {
       field.value = text;
       field.setAttribute('readonly', '');
       field.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
-      const host = elementId === 'jobLogContent' ? $('jobLogDialog') : document.body;
+      const host = {jobLogContent: 'jobLogDialog', liveLogContent: 'liveLogDialog'}[elementId] ? $({jobLogContent: 'jobLogDialog', liveLogContent: 'liveLogDialog'}[elementId]) : document.body;
       host.appendChild(field);
       try {
         field.select();
@@ -992,12 +1038,41 @@ function setMetricExperiment(experiment) {
   renderMetrics();
 }
 
+function setMetricMethods(methods) {
+  selectedMetricMethods = new Set(METRIC_METHOD_ORDER.filter(method => methods.includes(method)));
+  try { window.localStorage?.setItem('metric-methods-v1', JSON.stringify([...selectedMetricMethods])); } catch (_) { /* optional */ }
+  renderMetrics();
+}
+function toggleMetricMethod(method) {
+  if (method === 'all') {
+    setMetricMethods(selectedMetricMethods.size === METRIC_METHOD_ORDER.length ? [] : METRIC_METHOD_ORDER);
+    return;
+  }
+  const next = new Set(selectedMetricMethods);
+  if (next.has(method)) next.delete(method); else next.add(method);
+  setMetricMethods([...next]);
+}
+function renderMetricFilters() {
+  const all = selectedMetricMethods.size === METRIC_METHOD_ORDER.length;
+  const box = (value, label, checked, extra = '') => `<label class="method-check${extra}"><input type="checkbox"${checked ? ' checked' : ''} onchange="toggleMetricMethod('${value}')">${esc(label)}</label>`;
+  const html = box('all', 'Semua', all, ' method-all') + METRIC_METHOD_ORDER.map(method => box(method, method, selectedMetricMethods.has(method))).join('');
+  for (const id of ['metricMethodFilterTop', 'metricMethodFilterTable']) {
+    const target = $(id);
+    if (!target) continue;
+    target.innerHTML = html;
+    // "Semua" shows a dash when only some methods are selected.
+    const allBox = target.querySelector?.('.method-all input');
+    if (allBox) allBox.indeterminate = !all && selectedMetricMethods.size > 0;
+  }
+}
+
 function renderMetrics() {
-  const method = $('metricMethod').value || 'all';
   const threshold = $('geometryThreshold').value === '5' ? 5 : 2;
-  const filtered = cachedMetrics.filter(row => metricMethods[metricExperiment].includes(row.Metode))
+  const experimentRows = cachedMetrics.filter(row => metricMethods[metricExperiment].includes(row.Metode))
     .map(row => ({...row, Metode: row.Metode.replace('_scaffold_anchor', '')}))
-    .filter(row => method === 'all' || row.Metode === method);
+    .filter(row => selectedMetricMethods.has(row.Metode));
+  renderMetricFilters();
+  const filtered = experimentRows;
   const modelGroups = new Map();
   for (const row of filtered) {
     const key = JSON.stringify([row.Kelas, row['Model ID']]);
@@ -1011,7 +1086,9 @@ function renderMetrics() {
   const precision = `Precision @${threshold}cm (%)`, recall = `Recall @${threshold}cm (%)`, f1 = `F1 @${threshold}cm (%)`;
   const columns = ['Timestamp', 'Kelas', 'Model ID', 'Metode', 'PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
     precision, recall, f1, 'Peak VRAM (GB)', 'Total Waktu (Menit)'];
-  $('metricsBody').innerHTML = display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}${row.groupStart ? ' metric-group-start' : ''}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
+  $('metricsBody').innerHTML = !selectedMetricMethods.size
+    ? '<tr><td colspan="13" class="empty-msg"><strong>Belum ada metode dipilih</strong>Centang minimal satu metode pada filter.</td></tr>'
+    : display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}${row.groupStart ? ' metric-group-start' : ''}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
   for (const [column, target, context, unit, digits, explanation] of [
     ['PSNR (dB)', 'kpiPsnr', 'psnrContext', ' dB', 2, '↑'],
     ['SSIM', 'kpiSsim', 'ssimContext', '', 4, '↑'],
@@ -1024,7 +1101,7 @@ function renderMetrics() {
     $(target).textContent = values.length ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(digits) + unit : '—';
     $(context).textContent = `${values.length ? 'Rata-rata ' + values.length + ' hasil' : 'Belum dievaluasi'} · ${explanation}`;
   }
-  $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${method === 'all' ? '3DGS + SuGaR + 2DGS + RaDe-GS' : method}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri ablasi belum tersedia melalui dashboard.'}`;
+  $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${[...selectedMetricMethods].join(' + ') || 'tidak ada metode'}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri ablasi belum tersedia melalui dashboard.'}`;
   for (const [id, label] of [['precisionHeader', 'Precision'], ['recallHeader', 'Recall'], ['f1Header', 'F1']]) {
     $(id).textContent = `${label} @${threshold}cm (%)`;
   }

@@ -39,7 +39,6 @@ function page(localPreview = false) {
   nodes.get('settingsPreset').value = 'custom';
   nodes.get('sourceWidth').value = '3840';
   nodes.get('sourceHeight').value = '2160';
-  nodes.get('metricMethod').value = 'all';
   nodes.get('geometryThreshold').value = '2';
   const storage = new Map();
   const catalog = {classes: Object.fromEntries(['Dewa','Dewi','Mitologi','Penabuh','Pengapit','Punakawan','Raksasa','Wanara'].map(cls => [cls, ['model_01','model_02']])), total_models: 18};
@@ -394,7 +393,6 @@ test('settings summary and submitted jobs read the same controls; photo referenc
   assert.equal(app.nodes.get('summaryGpu').textContent, 'GPU 0');
   assert.equal(app.nodes.get('summaryColmap').textContent, 'CPU / maks. 2000 px');
   assert.equal(app.nodes.get('summaryTraining').textContent, '1× / maks. 1600 px');
-  assert.equal(app.nodes.get('summaryRefinement').textContent, '15.000 iterasi');
   assert.match(app.nodes.get('resolutionPreview').textContent, /1600 × 900/);
   assert.equal(app.calls.filter(([url]) => url === '/api/run').length, 0);
   await vm.runInContext("triggerRun('full_pipeline', 'Dewa', 'model_01')", app.context);
@@ -710,8 +708,7 @@ test('all seven metric cards show real merged results with method and geometry-t
   vm.runInContext('renderMetrics()', app.context);
   assert.equal(app.nodes.get('kpiF1').textContent, '88.89%');
   assert.equal(app.nodes.get('precisionHeader').textContent, 'Precision @5cm (%)');
-  app.nodes.get('metricMethod').value = '3DGS';
-  vm.runInContext('renderMetrics()', app.context);
+  vm.runInContext("setMetricMethods(['3DGS'])", app.context);
   assert.equal(app.nodes.get('kpiPsnr').textContent, '20.00 dB');
   assert.equal(app.nodes.get('kpiF1').textContent, '—');
   assert.doesNotMatch(app.nodes.get('metricsBody').innerHTML, /SuGaR/);
@@ -858,8 +855,7 @@ test('evaluation tabs restore two method rows per statue and Excel exports all e
   assert.equal((app.nodes.get('metricsBody').innerHTML.match(/<tr /g) || []).length, 2);
   assert.equal(app.nodes.get('metricsAblation').attributes['aria-pressed'], 'true');
   assert.equal(app.nodes.get('kpiChamfer').textContent, '\u2014');
-  app.nodes.get('metricMethod').value = '3DGS';
-  vm.runInContext('renderMetrics()', app.context);
+  vm.runInContext("setMetricMethods(['3DGS'])", app.context);
   assert.equal(app.nodes.get('kpiPsnr').textContent, '40.00 dB');
   let exported;
   app.context.window.open = url => {exported = url;};
@@ -898,4 +894,62 @@ test('an older saved version of the recommendation moves to the current one', as
   assert.equal(app.nodes.get('settingsPreset').value, 'statue_quality');
   assert.equal(app.nodes.get('gaussiansPerTriangle').value, '1');
   assert.equal(app.nodes.get('refinementTime').value, 'long');
+});
+
+test('live process log opens in a popup and follows new lines', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  vm.runInContext("renderLogs(['[QUEUE] mulai', 'Iteration: 200'])", app.context);
+  vm.runInContext('openLiveLogFullscreen()', app.context);
+  assert.equal(app.nodes.get('liveLogDialog').open, true);
+  assert.equal(app.nodes.get('liveLogContent').textContent, '[QUEUE] mulai\nIteration: 200');
+  vm.runInContext("renderLogs(['[QUEUE] mulai', 'Iteration: 200', 'Iteration: 400'])", app.context);
+  assert.match(app.nodes.get('liveLogContent').textContent, /Iteration: 400$/);
+  assert.match(app.nodes.get('liveLogStatus').textContent, /3 baris terakhir/);
+  vm.runInContext('closeLiveLogFullscreen()', app.context);
+  assert.equal(app.nodes.get('liveLogDialog').open, false);
+});
+
+test('results can show any combination of methods', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  const base = {Status: 'COMPLETED', Timestamp: '2026-01-01 00:00:00', 'Model ID': 'model_01'};
+  app.setMetrics([
+    {...base, Kelas: 'Dewa', Metode: '3DGS', 'PSNR (dB)': '24'}, {...base, Kelas: 'Dewa', Metode: 'SuGaR', 'PSNR (dB)': '23'},
+    {...base, Kelas: 'Dewa', Metode: '2DGS', 'PSNR (dB)': '25'}, {...base, Kelas: 'Dewi', Metode: 'RaDe-GS', 'PSNR (dB)': '26'}]);
+  await vm.runInContext('refreshMetrics()', app.context);
+  const rows = () => (app.nodes.get('metricsBody').innerHTML.match(/<tr /g) || []).length;
+  assert.equal(rows(), 4);
+  vm.runInContext("toggleMetricMethod('2DGS'); toggleMetricMethod('RaDe-GS')", app.context);
+  assert.equal(rows(), 2);
+  assert.equal(app.nodes.get('kpiPsnr').textContent, '23.50 dB');
+  assert.match(app.nodes.get('metricMethodFilterTable').innerHTML, /checked onchange="toggleMetricMethod\('3DGS'\)/);
+  assert.doesNotMatch(app.nodes.get('metricMethodFilterTable').innerHTML, /checked onchange="toggleMetricMethod\('2DGS'\)/);
+  vm.runInContext("toggleMetricMethod('all')", app.context);
+  assert.equal(rows(), 4);
+  vm.runInContext("toggleMetricMethod('all')", app.context);
+  assert.match(app.nodes.get('metricsBody').innerHTML, /Belum ada metode dipilih/);
+  assert.deepEqual(JSON.parse(app.storage.get('metric-methods-v1')), []);
+});
+
+test('bulk 3DGS and SuGaR are offered for all models and only ready models are counted', async () => {
+  const app = page();
+  app.setModel('Dewa', 'model_01', {colmap_done: true, '3dgs_7k': true});
+  app.setModel('Dewa', 'model_02', {colmap_done: true});
+  await app.events.DOMContentLoaded();
+  vm.runInContext("openQueueDialog('', '', 'full_pipeline')", app.context);
+  for (const action of ['3dgs', 'sugar', '2dgs', 'radegs', 'evaluate_visual', 'evaluate']) {
+    assert.equal(app.nodes.get('queue-action-' + action).hidden, false, action);
+    assert.equal(app.nodes.get('queue-action-' + action).disabled, false, action);
+  }
+  assert.equal(app.nodes.get('queue-action-colmap').hidden, true);
+  vm.runInContext("chooseQueueAction('3dgs')", app.context);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /^2 pekerjaan/);
+  vm.runInContext("chooseQueueAction('sugar')", app.context);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /^1 pekerjaan/);
+  await vm.runInContext('submitQueueDialog()', app.context);
+  const request = app.calls.find(([url]) => url === '/api/run')[1];
+  assert.equal(request.action, 'sugar');
+  assert.equal(request.class_name, '');
+  assert.equal(request.model_id, '');
 });

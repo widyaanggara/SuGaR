@@ -283,7 +283,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     cls, mdl = data.get("class_name", ""), data.get("model_id", "")
     if not isinstance(cls, str) or not isinstance(mdl, str):
         raise ValueError("Kelas dan model harus berupa teks.")
-    if action not in {"full_pipeline", "2dgs", "radegs", "evaluate_visual", "evaluate"} and (not cls or not mdl):
+    if action not in {"full_pipeline", "3dgs", "sugar", "2dgs", "radegs", "evaluate_visual", "evaluate"} and (not cls or not mdl):
         raise ValueError("Pilih satu kelas dan satu model untuk tahap ini.")
     pairs = scene_pairs(cls, mdl)
     settings = {**resolution_settings(data), **colmap_settings(data), **sugar_settings(data)}
@@ -360,7 +360,15 @@ def prepare_jobs(data, root=PROJECT_ROOT):
             geometry_settings = {cls: {mdl: selected_options for c, mdl in pairs if c == cls}
                                  for cls, _ in pairs}
     jobs, skipped = [], []
+    # Bulk 3DGS/SuGaR skips unprepared models; a single model keeps its direct job.
+    bulk = not (cls and mdl)
     for cls, mdl in pairs:
+        if bulk and action in ('3dgs', 'sugar') and not has_colmap_model(Path(root) / 'datasets' / cls / mdl):
+            skipped.append(f'{cls}/{mdl}: jalankan COLMAP terlebih dahulu')
+            continue
+        if bulk and action == 'sugar' and not has_checkpoint(Path(root) / 'outputs/3dgs' / cls / mdl, 7000):
+            skipped.append(f'{cls}/{mdl}: checkpoint 3DGS 7k diperlukan')
+            continue
         if action in EXTERNAL_METHODS and not has_colmap_model(Path(root) / 'datasets' / cls / mdl):
             skipped.append(f'{cls}/{mdl}: jalankan COLMAP terlebih dahulu')
             continue
@@ -454,7 +462,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/metrics.csv":
                 self.send_metrics_csv()
             elif path == "/api/metrics.xlsx":
-                payload = build_excel(get_metrics_table(self.root), self.root)
+                names = read_model_names(self.root)
+                payload = build_excel(get_metrics_table(self.root), self.root,
+                                      [(cls, mdl, model_display_name(cls, mdl, names)) for cls, mdl in scene_pairs()])
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                 self.send_header('Content-Disposition', 'attachment; filename="evaluasi_baseline_dan_ablasi.xlsx"')

@@ -9,34 +9,64 @@
   },
   "presets": {
     "statue_quality": {
-      "label": "SuGaR fokus patung · 1 Gaussian · long (rekomendasi)",
-      "description": "Rekomendasi penelitian ini: parameter SuGaR high_poly resmi (mesh 1.000.000, 1 Gaussian/segitiga, refinement 15.000 iterasi, dn_consistency) ditambah mesh fokus patung: patung, sekitar patung, dan background masing-masing punya mesh Poisson sendiri hingga 1.000.000 segitiga, sehingga object.ply hanya patung dan tanah dekat patung tidak memakai mesh background yang kasar. Tetap SuGaR murni. Background jauh tetap lebih halus dibanding metode dengan Gaussian bebas.",
-      "values": {"vertices": 1000000, "gaussians_per_triangle": 1, "refinement_time": "long", "regularization": "dn_consistency"}
+      "label": "Fokus patung · rekomendasi",
+      "description": "Parameter high_poly resmi SuGaR dengan mesh fokus patung. Dipakai untuk semua patung.",
+      "values": {
+        "vertices": 1000000,
+        "gaussians_per_triangle": 1,
+        "refinement_time": "long",
+        "regularization": "dn_consistency"
+      }
     },
     "official_high": {
       "label": "SuGaR high_poly · long",
-      "description": "Konfigurasi high_poly dan refinement long dari repo resmi: parameter mesh 1.000.000, 1 Gaussian/segitiga, 15.000 iterasi. Tidak menjamin muat di VRAM tiap scene.",
-      "values": {"vertices": 1000000, "gaussians_per_triangle": 1, "refinement_time": "long", "regularization": "dn_consistency"}
+      "description": "Konfigurasi high_poly resmi dari repo SuGaR.",
+      "values": {
+        "vertices": 1000000,
+        "gaussians_per_triangle": 1,
+        "refinement_time": "long",
+        "regularization": "dn_consistency"
+      }
     },
     "official_low": {
       "label": "SuGaR low_poly · long",
-      "description": "Opsi low_poly resmi: parameter mesh 200.000 dan 6 Gaussian/segitiga; refinement long 15.000 iterasi. Low-poly tidak otomatis berarti lebih hemat VRAM.",
-      "values": {"vertices": 200000, "gaussians_per_triangle": 6, "refinement_time": "long", "regularization": "dn_consistency"}
+      "description": "Opsi low_poly resmi: mesh lebih kecil, lebih banyak Gaussian per segitiga.",
+      "values": {
+        "vertices": 200000,
+        "gaussians_per_triangle": 6,
+        "refinement_time": "long",
+        "regularization": "dn_consistency"
+      }
     },
     "experimental_capacity_medium": {
-      "label": "Uji kualitas/waktu · 3 Gaussian + medium",
-      "description": "Eksperimental: mesh 1.000.000, 3 Gaussian/segitiga, refinement 7.000. Menambah kapasitas dan mengurangi iterasi dibanding high_poly long; VRAM/waktu dan perbaikan background belum dibuktikan pada dataset ini. Uji satu patung dulu.",
-      "values": {"vertices": 1000000, "gaussians_per_triangle": 3, "refinement_time": "medium", "regularization": "dn_consistency"}
+      "label": "Uji · 3 Gaussian + medium",
+      "description": "Eksperimen kapasitas lebih besar dengan iterasi lebih sedikit; belum dibuktikan pada dataset ini.",
+      "values": {
+        "vertices": 1000000,
+        "gaussians_per_triangle": 3,
+        "refinement_time": "medium",
+        "regularization": "dn_consistency"
+      }
     },
     "experimental_background_sdf": {
-      "label": "Uji latar kompleks · sdf + long",
-      "description": "Eksperimental pada dataset ini: regularisasi sdf, mesh 1.000.000, 1 Gaussian/segitiga, refinement 15.000. Opsi membandingkan regularisasi pada latar kompleks; tidak menjamin hasil lebih baik atau lebih cepat.",
-      "values": {"vertices": 1000000, "gaussians_per_triangle": 1, "refinement_time": "long", "regularization": "sdf"}
+      "label": "Uji · sdf + long",
+      "description": "Eksperimen regularisasi sdf untuk latar kompleks; belum dibuktikan pada dataset ini.",
+      "values": {
+        "vertices": 1000000,
+        "gaussians_per_triangle": 1,
+        "refinement_time": "long",
+        "regularization": "sdf"
+      }
     },
     "official_short": {
       "label": "Uji awal · low_poly + short",
-      "description": "Gabungan dua opsi yang disediakan upstream: low_poly (200.000, 6 Gaussian/segitiga) dan short (2.000 iterasi). Untuk uji alur; jangan dianggap hasil benchmark atau replikasi tabel paper.",
-      "values": {"vertices": 200000, "gaussians_per_triangle": 6, "refinement_time": "short", "regularization": "dn_consistency"}
+      "description": "Uji alur cepat; jangan dipakai sebagai hasil penelitian.",
+      "values": {
+        "vertices": 200000,
+        "gaussians_per_triangle": 6,
+        "refinement_time": "short",
+        "regularization": "dn_consistency"
+      }
     }
   }
 }

@@ -42,8 +42,9 @@ class ExcelExportTests(unittest.TestCase):
         handler.send_response.assert_called_once_with(200)
         handler.send_header.assert_any_call('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         with ZipFile(io.BytesIO(handler.wfile.getvalue())) as archive:
-            ablation = ET.fromstring(archive.read('xl/worksheets/sheet3.xml'))
-            self.assertEqual(len(ablation.findall('s:sheetData/s:row', NS)), 6)
+            sugar = ET.fromstring(archive.read('xl/worksheets/sheet2.xml'))
+            # The download lists all 18 registered statues; Dewa/model_02 adds an ablation row.
+            self.assertEqual(len(sugar.findall('s:sheetData/s:row', NS)), 4 + 18 + 1)
 
     def test_merge_retains_training_resources_and_sorts_history(self):
         result = latest_metrics(list(reversed(sample_rows())))
@@ -61,28 +62,34 @@ class ExcelExportTests(unittest.TestCase):
                 ET.fromstring(archive.read(name))
             workbook = ET.fromstring(archive.read('xl/workbook.xml'))
             self.assertEqual([x.attrib['name'] for x in workbook.findall('s:sheets/s:sheet', NS)],
-                             ['Perbandingan', 'Baseline', 'Studi ablasi', 'Panduan'])
-            baseline = ET.fromstring(archive.read('xl/worksheets/sheet2.xml'))
-            ablation = ET.fromstring(archive.read('xl/worksheets/sheet3.xml'))
-            self.assertEqual(len(baseline.findall('s:sheetData/s:row', NS)), 7)
-            self.assertEqual(len(ablation.findall('s:sheetData/s:row', NS)), 6)
-            cells = {c.attrib['r']: c for c in baseline.findall('.//s:c', NS)}
-            self.assertEqual(cells['I5'].find('s:v', NS).text, '25.0')
-            self.assertEqual(cells['I6'].find('s:v', NS).text, '23.0')
-            self.assertEqual(cells['C5'].find('s:is/s:t', NS).text, '=unsafe & <name>')
-            self.assertEqual(cells['C5'].attrib['t'], 'inlineStr')
-            self.assertEqual(cells['D5'].find('s:is/s:t', NS).text, '3DGS')
-            self.assertEqual(cells['D6'].find('s:is/s:t', NS).text, 'SuGaR')
-            self.assertEqual(cells['C5'].attrib['s'], cells['C6'].attrib['s'])
-            self.assertNotEqual(cells['C6'].attrib['s'], cells['C7'].attrib['s'])
-            self.assertEqual(cells['I7'].find('s:v', NS).text, '0.0')
-            self.assertFalse(baseline.findall('.//s:f', NS))
-            self.assertEqual(baseline.find('s:autoFilter', NS).attrib['ref'], 'A4:T7')
-            self.assertEqual(baseline.find('.//s:pane', NS).attrib['topLeftCell'], 'D5')
-            delta = ET.fromstring(archive.read('xl/worksheets/sheet1.xml'))
-            differences = {c.attrib['r']: c for c in delta.findall('.//s:c', NS)}
-            self.assertAlmostEqual(float(differences['E5'].find('s:v', NS).text), 0.1)
-            self.assertAlmostEqual(float(differences['E6'].find('s:v', NS).text), 0.2)
+                             ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS', 'Semua log'])
+            gs3 = ET.fromstring(archive.read('xl/worksheets/sheet1.xml'))
+            sugar = ET.fromstring(archive.read('xl/worksheets/sheet2.xml'))
+            dgs2 = ET.fromstring(archive.read('xl/worksheets/sheet3.xml'))
+            # Each method tab only lists that method's own results.
+            self.assertEqual(len(gs3.findall('s:sheetData/s:row', NS)), 4 + 3)
+            self.assertEqual(len(sugar.findall('s:sheetData/s:row', NS)), 4 + 3)
+            self.assertEqual(len(dgs2.findall('s:sheetData/s:row', NS)), 4 + 2)  # statues listed with "—"
+            cells = {c.attrib['r']: c for c in gs3.findall('.//s:c', NS)}
+            text = lambda ref: cells[ref].find('s:is/s:t', NS).text
+            self.assertEqual([text(f'A{r}') for r in range(5, 8)], ['Baseline', 'Studi ablasi', 'Baseline'])
+            self.assertEqual(cells['E5'].find('s:v', NS).text, '25.0')
+            self.assertEqual(cells['E6'].find('s:v', NS).text, '25.1')
+            self.assertEqual(cells['E7'].find('s:v', NS).text, '0.0')
+            self.assertEqual(text('D5'), '=unsafe & <name>')
+            self.assertEqual(cells['D5'].attrib['t'], 'inlineStr')
+            self.assertEqual(cells['D5'].attrib['s'], cells['D6'].attrib['s'])
+            self.assertNotEqual(cells['D6'].attrib['s'], cells['D7'].attrib['s'])
+            self.assertFalse(gs3.findall('.//s:f', NS))
+            self.assertEqual(gs3.find('s:autoFilter', NS).attrib['ref'], 'A4:W7')
+            self.assertEqual(gs3.find('.//s:pane', NS).attrib['topLeftCell'], 'E5')
+            sugar_cells = {c.attrib['r']: c for c in sugar.findall('.//s:c', NS)}
+            self.assertEqual(sugar_cells['E5'].find('s:v', NS).text, '23.0')
+            self.assertEqual(sugar_cells['E6'].find('s:v', NS).text, '23.2')
+            self.assertEqual(sugar_cells['E7'].find('s:is/s:t', NS).text, '—')
+            log = ET.fromstring(archive.read('xl/worksheets/sheet5.xml'))
+            # Full history: every row, including superseded and failed runs.
+            self.assertEqual(len(log.findall('s:sheetData/s:row', NS)), 4 + len(sample_rows()))
 
     def test_counts_are_from_matching_run_and_legacy_missing_stays_missing(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -128,10 +135,12 @@ class ExcelExportTests(unittest.TestCase):
                     self.assertEqual(image_counts(root, 'Dewa', 'model_02', experiment, row),
                                      [total, total - len(names[::8]), len(names[::8])])
                     with ZipFile(io.BytesIO(build_excel([row], root))) as archive:
-                        sheet = ET.fromstring(archive.read('xl/worksheets/sheet' + ('2' if experiment == 'baseline' else '3') + '.xml'))
+                        sheet = ET.fromstring(archive.read('xl/worksheets/sheet' + ('1' if method == '3DGS' else '2') + '.xml'))
                         cells = {c.attrib['r']: c for c in sheet.findall('.//s:c', NS)}
-                        self.assertEqual(int(cells['F5'].find('s:v', NS).text), total)
-                        self.assertEqual(int(cells['G5'].find('s:v', NS).text), total - len(names[::8]))
+                        line = 5 if experiment == 'baseline' else 6  # baseline row precedes ablation
+                        self.assertEqual(int(cells[f'R{line}'].find('s:v', NS).text), total)
+                        self.assertEqual(int(cells[f'S{line}'].find('s:v', NS).text), total - len(names[::8]))
+                        self.assertEqual(int(cells[f'T{line}'].find('s:v', NS).text), len(names[::8]))
 
     def test_legacy_counts_reject_mismatched_or_malformed_artifacts(self):
         with tempfile.TemporaryDirectory() as folder:

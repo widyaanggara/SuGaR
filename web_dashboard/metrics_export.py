@@ -107,134 +107,220 @@ def xml_text(value):
     return escape(re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', str(value)))
 
 
-def sheet_xml(title, note, headers, rows, groups=()):
-    width = len(headers)
-    end = column_name(width)
-    data = [[title], [note], [], headers, *rows]
-    cells = []
-    previous_model, model_band = None, -1
-    for r, values in enumerate(data, 1):
-        if r > 4 and headers[0] == 'Kelas':
-            model = tuple(values[:2])
-            if model != previous_model:
-                model_band += 1
-                previous_model = model
-        body_style = (4 + model_band % 2) if model_band >= 0 else (4 if r % 2 else 5)
+# ---------------------------------------------------------------------------
+# Workbook layout
+# ---------------------------------------------------------------------------
+METHOD_ORDER = ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')
+# (source column, header, number format, direction: 1 higher is better, -1 lower is better)
+METRIC_COLUMNS = [
+    ('PSNR (dB)', 'PSNR (dB) ↑', '0.00', 1),
+    ('SSIM', 'SSIM ↑', '0.0000', 1),
+    ('LPIPS', 'LPIPS ↓', '0.0000', -1),
+    ('Chamfer Dist (cm)', 'Chamfer (cm) ↓', '0.00', -1),
+    ('Precision @2cm (%)', 'Precision (%) ↑', '0.0', 1),
+    ('Recall @2cm (%)', 'Recall (%) ↑', '0.0', 1),
+    ('F1 @2cm (%)', 'F1 (%) ↑', '0.0', 1),
+    ('Precision @5cm (%)', 'Precision (%) ↑', '0.0', 1),
+    ('Recall @5cm (%)', 'Recall (%) ↑', '0.0', 1),
+    ('F1 @5cm (%)', 'F1 (%) ↑', '0.0', 1),
+    ('Peak VRAM (GB)', 'Peak VRAM (GB) ↓', '0.00', -1),
+    ('Total Waktu (Menit)', 'Waktu training (menit) ↓', '0.0', -1),
+]
+INK, MUTED = 'FF292524', 'FF78716C'
+
+
+class Styles:
+    """Small registry so each sheet can ask for exactly the cell look it needs."""
+
+    def __init__(self):
+        self.fonts = ['<font><sz val="10"/><name val="Arial"/><color rgb="FF292524"/></font>']
+        self.fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>']
+        self.borders = ['<border><left/><right/><top/><bottom/><diagonal/></border>']
+        self.formats = {}
+        self.xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>']
+        self.cache = {}
+
+    @staticmethod
+    def _index(items, value):
+        if value not in items:
+            items.append(value)
+        return items.index(value)
+
+    def get(self, bold=False, size=10, color=INK, fill=None, fmt=None, align='left', wrap=False, top=None, bottom=None):
+        key = (bold, size, color, fill, fmt, align, wrap, top, bottom)
+        if key in self.cache:
+            return self.cache[key]
+        font = self._index(self.fonts, f'<font>{"<b/>" if bold else ""}<sz val="{size}"/><name val="Arial"/><color rgb="{color}"/></font>')
+        fill_id = 0 if fill is None else self._index(self.fills, f'<fill><patternFill patternType="solid"><fgColor rgb="{fill}"/><bgColor indexed="64"/></patternFill></fill>')
+        side = lambda name, colour: f'<{name} style="thin"><color rgb="{colour}"/></{name}>' if colour else f'<{name}/>'
+        border = self._index(self.borders, f'<border><left/><right/>{side("top", top)}{side("bottom", bottom)}<diagonal/></border>')
+        fmt_id = 0
+        if fmt == '0':
+            fmt_id = 1
+        elif fmt:
+            fmt_id = self.formats.setdefault(fmt, 164 + len(self.formats))
+        wrap_attr = ' wrapText="1"' if wrap else ''
+        xf = (f'<xf numFmtId="{fmt_id}" fontId="{font}" fillId="{fill_id}" borderId="{border}" xfId="0" '
+              f'applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">'
+              f'<alignment horizontal="{align}" vertical="center"{wrap_attr}/></xf>')
+        self.cache[key] = self._index(self.xfs, xf)
+        return self.cache[key]
+
+    def xml(self):
+        formats = ''.join(f'<numFmt numFmtId="{i}" formatCode="{xml_text(code)}"/>' for code, i in self.formats.items())
+        return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                f'<numFmts count="{len(self.formats)}">{formats}</numFmts>'
+                f'<fonts count="{len(self.fonts)}">{"".join(self.fonts)}</fonts>'
+                f'<fills count="{len(self.fills)}">{"".join(self.fills)}</fills>'
+                f'<borders count="{len(self.borders)}">{"".join(self.borders)}</borders>'
+                '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+                f'<cellXfs count="{len(self.xfs)}">{"".join(self.xfs)}</cellXfs>'
+                '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
+
+
+def sheet_xml(styles, title, note, columns, rows, groups=(), freeze=4, empty='Belum ada hasil.', autofilter=True):
+    """columns: [(header, width, number format or None, align)];
+    rows: [{'values': [...], 'band': 0|1, 'start': bool}]."""
+    width = len(columns)
+    last = column_name(width)
+    xml_rows = []
+
+    def cell(ref, value, style):
+        if value is None or value == '':
+            value = '—'
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{ref}" s="{style}"><v>{value}</v></c>'
+        return f'<c r="{ref}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{xml_text(value)}</t></is></c>'
+
+    title_style = styles.get(bold=True, size=14)
+    note_style = styles.get(size=9, color=MUTED, wrap=True)
+    xml_rows.append(f'<row r="1" ht="26" customHeight="1">{cell("A1", title, title_style)}</row>')
+    xml_rows.append(f'<row r="2" ht="30" customHeight="1">{cell("A2", note, note_style)}</row>')
+    merges = [f'A1:{last}1', f'A2:{last}2']
+
+    group_style = styles.get(bold=True, size=9, color=INK, fill='FFE7E5E4', align='center', bottom='FFD6D3D1')
+    group_cells = [f'<c r="{column_name(c)}3" s="{group_style}"/>' for c in range(1, width + 1)]
+    for start, stop, label in groups:
+        group_cells[start - 1] = cell(f'{column_name(start)}3', label, group_style)
+        if stop > start:
+            merges.append(f'{column_name(start)}3:{column_name(stop)}3')
+    xml_rows.append(f'<row r="3" ht="20" customHeight="1">{"".join(group_cells)}</row>')
+
+    header_cells = []
+    for c, (header, _, fmt, align) in enumerate(columns, 1):
+        style = styles.get(bold=True, size=9, color='FFFFFFFF', fill='FF1C1917', align=align, wrap=True)
+        header_cells.append(cell(f'{column_name(c)}4', header, style))
+    xml_rows.append(f'<row r="4" ht="40" customHeight="1">{"".join(header_cells)}</row>')
+
+    if not rows:
+        message_style = styles.get(color=MUTED)
+        xml_rows.append(f'<row r="5" ht="22" customHeight="1">{cell("A5", empty, message_style)}</row>')
+        merges.append(f'A5:{last}5')
+    for r, row in enumerate(rows, 5):
+        fill = 'FFF5F5F4' if row.get('band') else None
+        top = 'FFD6D3D1' if row.get('start') and r > 5 else None
         contents = []
-        for c, value in enumerate(values, 1):
-            style = 1 if r == 1 else 2 if r in (3, 4) else 3 if r == 2 else body_style
-            if value is None:
-                value = '—'
-            ref = f'{column_name(c)}{r}'
-            if isinstance(value, (float, int)):
-                numeric_style = style + 2 if isinstance(value, float) and style in (4, 5) else style
-                contents.append(f'<c r="{ref}" s="{numeric_style}"><v>{value}</v></c>')
-            else:
-                contents.append(f'<c r="{ref}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{xml_text(value)}</t></is></c>')
-        height = 42 if r in (2, 4) else 26
-        if r > 4 and len(values) > 2:
-            height = max(height, 16 * math.ceil(len(str(values[2] or '')) / 25))
-        cells.append(f'<row r="{r}" ht="{height}" customHeight="1">{"".join(contents)}</row>')
-    merges = [f'A1:{column_name(min(width, 12))}1', f'A2:{column_name(min(width, 19))}2']
-    if groups:
-        group_cells = []
-        for start, stop, label in groups:
-            group_cells.append(f'<c r="{column_name(start)}3" s="2" t="inlineStr"><is><t>{xml_text(label)}</t></is></c>')
-            if stop > start:
-                merges.append(f'{column_name(start)}3:{column_name(stop)}3')
-        cells[2] = f'<row r="3" ht="26" customHeight="1">{"".join(group_cells)}</row>'
-    cols = ''.join(f'<col min="{i}" max="{i}" width="{27 if i == 3 or headers[i-1] == "Waktu hasil terakhir" else 19 if i <= 3 else 17}" customWidth="1"/>' for i in range(1, width + 1))
+        for c, value in enumerate(row['values'], 1):
+            _, _, fmt, align = columns[c - 1]
+            color = MUTED if value is None else INK
+            numeric = isinstance(value, (int, float)) and not isinstance(value, bool)
+            style = styles.get(color=color, fill=fill,
+                               fmt=fmt if numeric else None, align=align if value is not None else 'center' if align == 'right' else align,
+                               top=top, wrap=row.get('wrap', False))
+            contents.append(cell(f'{column_name(c)}{r}', value, style))
+        height = row.get('height', 20)
+        xml_rows.append(f'<row r="{r}" ht="{height}" customHeight="1">{"".join(contents)}</row>')
+
+    data_end = max(5, 4 + len(rows))
+    cols = ''.join(f'<col min="{i}" max="{i}" width="{w}" customWidth="1"/>' for i, (_, w, _, _) in enumerate(columns, 1))
+    pane = (f'<pane xSplit="{freeze}" ySplit="4" topLeftCell="{column_name(freeze + 1)}5" activePane="bottomRight" state="frozen"/>'
+            if freeze else '<pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/>')
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f'<dimension ref="A1:{end}{len(data)}"/>'
-        '<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane xSplit="3" ySplit="4" topLeftCell="D5" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>'
-        f'<cols>{cols}</cols><sheetData>{"".join(cells)}</sheetData>'
-        f'<autoFilter ref="A4:{end}{max(4, len(data))}"/>'
-        f'<mergeCells count="{len(merges)}">' + ''.join(f'<mergeCell ref="{ref}"/>' for ref in merges) + '</mergeCells>'
-        '<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
-        '<pageSetup orientation="landscape" paperSize="8"/></worksheet>')
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            f'<dimension ref="A1:{last}{data_end}"/>'
+            f'<sheetViews><sheetView workbookViewId="0" showGridLines="0">{pane}</sheetView></sheetViews>'
+            f'<cols>{cols}</cols><sheetData>{"".join(xml_rows)}</sheetData>'
+            + (f'<autoFilter ref="A4:{last}{data_end}"/>' if autofilter and rows else '')
+            + f'<mergeCells count="{len(merges)}">' + ''.join(f'<mergeCell ref="{ref}"/>' for ref in merges) + '</mergeCells>'
+            '<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
+            '<pageSetup orientation="landscape" paperSize="9"/></worksheet>')
 
 
-STYLES = '''<?xml version="1.0" encoding="UTF-8"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<numFmts count="1"><numFmt numFmtId="164" formatCode="0.0000;-0.0000;0.0000"/></numFmts>
-<fonts count="3"><font><sz val="11"/><name val="Arial"/><color rgb="FF243247"/></font><font><b/><sz val="15"/><name val="Arial"/><color rgb="FFFFFFFF"/></font><font><b/><sz val="11"/><name val="Arial"/><color rgb="FFFFFFFF"/></font></fonts>
-<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF253B53"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF0F4F8"/><bgColor indexed="64"/></patternFill></fill></fills>
-<borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="8">
-<xf fontId="0" fillId="0" borderId="0" numFmtId="0" xfId="0"/>
-<xf fontId="1" fillId="2" borderId="0" numFmtId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>
-<xf fontId="2" fillId="2" borderId="0" numFmtId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-<xf fontId="0" fillId="0" borderId="0" numFmtId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-<xf fontId="0" fillId="0" borderId="0" numFmtId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-<xf fontId="0" fillId="3" borderId="0" numFmtId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-<xf fontId="0" fillId="0" borderId="0" numFmtId="164" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
-<xf fontId="0" fillId="3" borderId="0" numFmtId="164" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
-</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'''
-
-
-def build_excel(rows, root):
+def build_excel(rows, root, patung=None):
+    """patung: optional [(kelas, model_id, nama)] so every registered statue is listed, even without results."""
     latest = latest_metrics(rows)
     index = {(r['Kelas'], r['Model ID'], r['Metode']): r for r in latest}
-    pairs = sorted({(r['Kelas'], r['Model ID']) for r in latest})
+    if patung is None:
+        patung = [(cls, mdl, next((r.get('Nama Model') for r in latest
+                                   if (r['Kelas'], r['Model ID']) == (cls, mdl) and r.get('Nama Model')), mdl))
+                  for cls, mdl in sorted({(r['Kelas'], r['Model ID']) for r in latest})]
+    styles = Styles()
     sheets = []
-    labels = ['PSNR (dB) ↑', 'SSIM ↑', 'LPIPS ↓', 'Chamfer (cm) ↓',
-              'Precision @2cm (%) ↑', 'Recall @2cm (%) ↑', 'F1 @2cm (%) ↑',
-              'Precision @5cm (%) ↑', 'Recall @5cm (%) ↑', 'F1 @5cm (%) ↑',
-              'Peak VRAM (GB)', 'Training tahap (menit)']
-    block = ['Waktu hasil terakhir', 'Gambar registered', 'Gambar train', 'Gambar test', *labels]
-    for experiment, title in [('baseline', 'Baseline'), ('scaffold_anchor', 'Studi ablasi')]:
-        suffix = '' if experiment == 'baseline' else '_scaffold_anchor'
-        values = []
-        for cls, mdl in pairs:
-            for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS'):
+    experiments = [('baseline', 'Baseline', ''), ('scaffold_anchor', 'Studi ablasi', '_scaffold_anchor')]
+
+    # One tab per method: every statue, every column recorded for that method.
+    quality = METRIC_COLUMNS[:10]
+    columns = [('Eksperimen', 12, None, 'left'), ('Kelas', 16, None, 'left'), ('Model ID', 19, None, 'left'),
+               ('Nama patung', 20, None, 'left'),
+               *[(header, 12, fmt, 'right') for _, header, fmt, _ in quality],
+               ('Jumlah titik/vertex', 13, '#,##0', 'right'), ('Peak VRAM (GB)', 11, '0.00', 'right'),
+               ('Waktu training (menit)', 11, '0.0', 'right'),
+               ('Gambar registered', 11, '0', 'right'), ('Gambar train', 10, '0', 'right'), ('Gambar test', 10, '0', 'right'),
+               ('Status', 12, None, 'left'), ('Session', 28, None, 'left'), ('Waktu hasil terakhir', 19, None, 'left')]
+    groups = [(1, 4, 'Patung'), (5, 7, 'Kualitas render'), (8, 11, 'Geometri @2 cm'), (12, 14, 'Geometri @5 cm'),
+              (15, 17, 'Model & sumber daya'), (18, 20, 'Jumlah gambar'), (21, 23, 'Catatan run')]
+    for method in METHOD_ORDER:
+        table = []
+        for band, (cls, mdl, name) in enumerate(patung):
+            group = []
+            for experiment, title, suffix in experiments:
                 row = index.get((cls, mdl, method + suffix))
-                if row is None:
-                    continue
-                values.append([cls, mdl, row.get('Nama Model', mdl), method,
-                               row.get('Timestamp'), *image_counts(root, cls, mdl, experiment, row),
-                               *[number(row.get(k)) for k in METRICS]])
-        note = 'Hasil terakhir per patung. ↑ lebih tinggi lebih baik; ↓ lebih rendah lebih baik. — = belum tersedia. Waktu/VRAM per tahap; SuGaR tidak termasuk 3DGS; ablasi tidak termasuk Scaffold.'
-        headers = ['Kelas', 'Model ID', 'Nama patung', 'Metode', *block]
-        sheets.append((title, sheet_xml(title + ' | Evaluasi rekonstruksi', note, headers, values,
-            [(1, 5, 'Patung dan metode'), (6, 8, 'Jumlah gambar'), (9, 11, 'Kualitas render'),
-             (12, 18, 'Kualitas geometri'), (19, 20, 'Sumber daya')])) )
-    delta_rows = []
-    for cls, mdl in pairs:
-        for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS'):
-            a, b = index.get((cls, mdl, method)), index.get((cls, mdl, method + '_scaffold_anchor'))
-            if not a or not b:
-                continue
-            delta_rows.append([cls, mdl, a.get('Nama Model', mdl), method, *[
-                number(b.get(k)) - number(a.get(k)) if number(a.get(k)) is not None and number(b.get(k)) is not None else None
-                for k in METRICS]])
-    sheets.insert(0, ('Perbandingan', sheet_xml('Ablasi − baseline | Patung yang sama',
-        'Selisih per patung/metode; positif menguntungkan untuk ↑, negatif untuk ↓. VRAM/waktu: negatif lebih hemat. Bukan bukti signifikansi; pastikan split, resolusi dan konfigurasi sama.',
-        ['Kelas', 'Model ID', 'Nama patung', 'Metode', *['Δ ' + x for x in labels]], delta_rows,
-        [(1, 4, 'Patung dan metode'), (5, 7, 'Selisih kualitas render'),
-         (8, 14, 'Selisih kualitas geometri'), (15, 16, 'Selisih sumber daya')])) )
-    notes = [
-        ['Cakupan', 'Semua baseline dan ablasi, tidak mengikuti filter tab/metode dashboard. Hanya status COMPLETED; hasil terakhir digabung per patung/metode.'],
-        ['Sumber metrik', 'Log evaluasi summary_comparison.csv yang juga digunakan dashboard. Nilai kosong tidak diubah menjadi nol.'],
-        ['Registered / train / test', 'Dari evaluation/metrics.json yang cocok dengan metrik, atau cameras.json milik run 3DGS pada eksperimen yang sama. Train = registered − test.'],
-        ['Run lama', 'Jumlah dipulihkan dari nama kamera unik jika daftar gambar uji dan interval split cocok dengan per_view. Tidak perlu evaluasi ulang. Jika artefak hilang/tidak cocok, registered/train tetap —.'],
-        ['Waktu dan VRAM', 'Diambil dari baris training, bukan evaluasi. Waktu SuGaR hanya tahap SuGaR. Biaya Scaffold belum masuk. Jangan menjumlahkan peak VRAM antar tahap.'],
-        ['Perbandingan adil', 'Bandingkan patung, split uji, resolusi dan konfigurasi yang sama. Selisih dihitung dari nilai log yang telah dibulatkan.'],
-        ['Kesimpulan', 'PSNR/SSIM/Precision/Recall/F1 lebih tinggi lebih baik; LPIPS/Chamfer lebih rendah lebih baik. Nilai render tidak menggantikan evaluasi geometri.'],
-        ['Pengulangan', 'Lakukan beberapa seed sebelum menyimpulkan peningkatan konsisten. Rata-rata lintas eksperimen harus memakai kumpulan patung yang sama.'],
-    ]
-    sheets.append(('Panduan', sheet_xml('Cara membaca laporan', 'Laporan perbandingan hasil rekonstruksi 3D',
-                                       ['Topik', 'Keterangan', ''], [[a, b, ''] for a, b in notes])))
-    # Notes need a wide prose column; keep the report tables independently sized.
-    sheets[-1] = (sheets[-1][0], sheets[-1][1].replace('min="2" max="2" width="19"', 'min="2" max="2" width="120"').replace('ht="26"', 'ht="46"').replace('vertical="center"/>', 'vertical="center" wrapText="1"/>'))
+                if not row and (suffix or group):
+                    continue  # ablation rows only appear once that experiment exists
+                row = row or {}
+                group.append({'values': [title, cls, mdl, row.get('Nama Model', name),
+                                         *[number(row.get(k)) for k, *_ in quality],
+                                         number(row.get('Jumlah Titik/Vertex')), number(row.get('Peak VRAM (GB)')),
+                                         number(row.get('Total Waktu (Menit)')),
+                                         *(image_counts(root, cls, mdl, experiment, row) if row else [None] * 3),
+                                         row.get('Status'), row.get('Session'), row.get('Timestamp')],
+                              'band': band % 2, 'start': not group})
+            table += group
+        sheets.append((method, sheet_xml(styles, f'{method} · Hasil rekonstruksi',
+            'Hasil terakhir per patung (status COMPLETED). ↑ lebih tinggi lebih baik, ↓ lebih rendah lebih baik. '
+            '— = belum tersedia. Riwayat lengkap setiap run ada di tab Semua log.',
+            columns, table, groups, empty=f'Belum ada hasil {method}.')))
+
+    # Every recorded row from the beginning, all columns, oldest first.
+    preferred = ['Timestamp', 'Session', 'Kelas', 'Model ID', 'Nama Model', 'Metode', 'Status',
+                 *[k for k, *_ in METRIC_COLUMNS[:10]], 'Jumlah Titik/Vertex', 'Peak VRAM (GB)', 'Total Waktu (Menit)']
+    keys = preferred + sorted({k for r in rows for k in r} - set(preferred))
+    keys = [k for k in keys if any(r.get(k) not in (None, '', '-') for r in rows)] or preferred
+    formats = {k: fmt for k, _, fmt, _ in METRIC_COLUMNS}
+    formats['Jumlah Titik/Vertex'] = '#,##0'
+    log_columns = [(k, 19 if k == 'Timestamp' else 28 if k == 'Session' else 12,
+                    formats.get(k), 'right' if k in formats else 'left') for k in keys]
+    history = []
+    for i, row in enumerate(sorted(rows, key=lambda r: r.get('Timestamp', ''))):
+        values = []
+        for k in keys:
+            value = row.get(k)
+            value = None if value in ('-', '') else value
+            values.append(number(value) if k in formats and number(value) is not None else value)
+        history.append({'values': values, 'band': i % 2})
+    sheets.append(('Semua log', sheet_xml(styles, 'Semua log evaluasi dan training',
+        'Seluruh baris yang tercatat dari awal, termasuk run lama, gagal, dan studi ablasi, urut dari yang paling lama.',
+        log_columns, history, [(1, len(log_columns), 'Log')], freeze=0, empty='Belum ada log.')))
+
     ns = 'http://schemas.openxmlformats.org/'
     stream = io.BytesIO()
     with ZipFile(stream, 'w', ZIP_DEFLATED) as archive:
         archive.writestr('[Content_Types].xml', f'<Types xmlns="{ns}package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + ''.join(f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' for i in range(1, len(sheets)+1)) + '</Types>')
         archive.writestr('_rels/.rels', f'<Relationships xmlns="{ns}package/2006/relationships"><Relationship Id="rId1" Type="{ns}officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
-        archive.writestr('xl/workbook.xml', f'<workbook xmlns="{ns}spreadsheetml/2006/main" xmlns:r="{ns}officeDocument/2006/relationships"><sheets>' + ''.join(f'<sheet name="{name}" sheetId="{i}" r:id="rId{i}"/>' for i, (name, _) in enumerate(sheets, 1)) + '</sheets></workbook>')
+        archive.writestr('xl/workbook.xml', f'<workbook xmlns="{ns}spreadsheetml/2006/main" xmlns:r="{ns}officeDocument/2006/relationships"><sheets>' + ''.join(f'<sheet name="{xml_text(name)}" sheetId="{i}" r:id="rId{i}"/>' for i, (name, _) in enumerate(sheets, 1)) + '</sheets></workbook>')
         archive.writestr('xl/_rels/workbook.xml.rels', f'<Relationships xmlns="{ns}package/2006/relationships">' + ''.join(f'<Relationship Id="rId{i}" Type="{ns}officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{i}.xml"/>' for i in range(1, len(sheets)+1)) + f'<Relationship Id="styles" Type="{ns}officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
-        archive.writestr('xl/styles.xml', STYLES)
+        archive.writestr('xl/styles.xml', styles.xml())
         for i, (_, xml) in enumerate(sheets, 1):
             archive.writestr(f'xl/worksheets/sheet{i}.xml', xml)
     return stream.getvalue()

@@ -274,6 +274,42 @@ class ExternalMethodTests(unittest.TestCase):
         self.assertEqual((staged / 'sparse/0/points3D.ply').read_text(), 'scaffold anchors')
         self.assertEqual(runner.staged_anchor_scene(scene, output, anchor), staged)
 
+    def test_anchor_staging_without_links_or_metadata_repairs_partial_files(self):
+        scene = self.root / 'datasets/Penabuh/model_01'
+        self.write(scene / 'images_2/nested/a.jpg', 'resized image')
+        self.write(scene / 'sparse/0/points3D.ply', 'original COLMAP')
+        anchor = self.root / 'anchor.ply'
+        self.write(anchor, 'scaffold anchors')
+        output = self.root / 'outputs/radegs'
+        with patch.object(runner.os, 'link', side_effect=PermissionError(1, 'Operation not permitted')), \
+             patch.object(runner.shutil, 'copystat', side_effect=PermissionError(1, 'Operation not permitted')):
+            staged = runner.staged_anchor_scene(scene, output, anchor)
+            (staged / 'ready.json').unlink()
+            self.write(staged / 'images/a.jpg', 'partial')
+            self.write(staged / 'sparse/0/cameras.bin', 'partial')
+            self.assertEqual(runner.staged_anchor_scene(scene, output, anchor), staged)
+        self.assertEqual((staged / 'images/a.jpg').read_text(), 'data')
+        self.assertEqual((staged / 'images_2/nested/a.jpg').read_text(), 'resized image')
+        self.assertEqual((staged / 'sparse/0/cameras.bin').read_text(), 'data')
+        self.assertEqual((staged / 'sparse/0/points3D.ply').read_text(), 'scaffold anchors')
+        self.assertEqual((scene / 'sparse/0/points3D.ply').read_text(), 'original COLMAP')
+        self.assertTrue((staged / 'ready.json').is_file())
+        self.assertFalse(list(staged.rglob('.stage-*')))
+
+    def test_anchor_staging_copy_failure_does_not_publish_ready_receipt(self):
+        scene = self.root / 'datasets/Penabuh/model_01'
+        anchor = self.root / 'anchor.ply'
+        self.write(anchor, 'scaffold anchors')
+        output = self.root / 'outputs/radegs'
+        with patch.object(runner.os, 'link', side_effect=OSError('cross-device')), \
+             patch.object(runner.shutil, 'copyfile', side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                runner.staged_anchor_scene(scene, output, anchor)
+        self.assertFalse(list(output.rglob('ready.json')))
+        self.assertFalse(list(output.rglob('.stage-*')))
+        staged = runner.staged_anchor_scene(scene, output, anchor)
+        self.assertEqual((staged / 'images/a.jpg').read_text(), 'data')
+
     def test_legacy_checkpoint_compatibility_is_scoped_to_radegs_resume(self):
         for method, resume in (('radegs', True), ('radegs', False), ('2dgs', True)):
             with self.subTest(method=method, resume=resume):

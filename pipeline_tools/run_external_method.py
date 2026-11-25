@@ -4,6 +4,7 @@ import os
 import json
 import hashlib
 import shutil
+import tempfile
 from pathlib import Path
 import subprocess
 import sys
@@ -43,19 +44,41 @@ def staged_anchor_scene(scene, output, initial_ply):
     if receipt.is_file() and (target / 'sparse/0/points3D.ply').is_file():
         return target
     target.mkdir(parents=True, exist_ok=True)
-    def link_or_copy(source, destination):
-        if Path(destination).exists():
-            return destination
+    def stage_file(source, destination, link=False):
+        # Publish complete bytes only. An interrupted attempt may have left a
+        # truncated destination; existence alone is not evidence of completion.
+        destination = Path(destination)
+        fd, name = tempfile.mkstemp(dir=destination.parent, prefix='.stage-')
+        os.close(fd)
+        temporary = Path(name)
         try:
-            os.link(source, destination)
-        except OSError:
-            shutil.copy2(source, destination)
-        return destination
+            if link:
+                temporary.unlink()
+                try:
+                    os.link(source, temporary)
+                except OSError:
+                    shutil.copyfile(source, temporary)
+            else:
+                shutil.copyfile(source, temporary)
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def stage_tree(source, destination, link=False):
+        # copytree also copies directory metadata, even with copyfile supplied.
+        # Mounted output filesystems can reject chmod/utime (EPERM).
+        destination.mkdir(parents=True, exist_ok=True)
+        for child in source.iterdir():
+            if child.is_dir():
+                stage_tree(child, destination / child.name, link=link)
+            else:
+                stage_file(child, destination / child.name, link=link)
+
     for folder in scene.iterdir():
         if folder.is_dir() and (folder.name == 'images' or folder.name.startswith('images_')):
-            shutil.copytree(folder, target / folder.name, copy_function=link_or_copy, dirs_exist_ok=True)
-    shutil.copytree(scene / 'sparse', target / 'sparse', dirs_exist_ok=True)
-    shutil.copy2(initial_ply, target / 'sparse/0/points3D.ply')
+            stage_tree(folder, target / folder.name, link=True)
+    stage_tree(scene / 'sparse', target / 'sparse')
+    stage_file(initial_ply, target / 'sparse/0/points3D.ply')
     atomic_json(receipt, identity)
     return target
 

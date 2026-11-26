@@ -294,7 +294,7 @@ def main():
             chamfer_cm = geo_metrics["chamfer_distance_cm"]
             if geo_metrics.get('alignment_passed') is False:
                 logger.log('[PERINGATAN] Alignment tidak lolos pemeriksaan overlap; skor di bawah ini '
-                           'ditandai alignment_passed=false dan belum valid sebagai hasil akhir.', level='warning')
+                           'tetap dihitung (alignment_passed=false di metrics.json).', level='warning')
             logger.log(f"Satuan LiDAR: {args.lidar_unit}; dikonversi ke meter sebelum evaluasi.")
             if args.auto_align:
                 logger.log(f"Skala otomatis rekonstruksi ke meter: {geo_metrics['scale_factor_to_meters']:.10g}; "

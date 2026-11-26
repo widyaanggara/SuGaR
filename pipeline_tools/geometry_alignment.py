@@ -193,7 +193,7 @@ def automatic_similarity_alignment(source_points, target_points, use_features=Tr
     passed = min(overlaps) >= .35
     if not passed and allow_weak:
         log('[ALIGN LEMAH] Overlap di bawah 35%, tetapi opsi alignment lemah aktif; skor tetap dihitung '
-            'dan ditandai alignment_passed=false. Skor ini bukan hasil yang lolos pemeriksaan registrasi.')
+            '(alignment_passed=false di metrics.json).')
     if not passed and not allow_weak:
         diagnostics = {
             'status': 'alignment_rejected', 'alignment_algorithm': ALIGNMENT_VERSION,

@@ -471,7 +471,9 @@
         <div id="settingsTabList" class="settings-tabs" role="tablist" aria-label="Kategori pengaturan" aria-orientation="vertical">
           <button id="tab-resolution" class="settings-tab" role="tab" aria-selected="true" aria-controls="pane-resolution" onclick="switchSettingsTab('resolution')"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span><strong>Resolusi foto</strong><small>Ukuran &amp; downscale</small></span></button>
           <button id="tab-colmap" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-colmap" tabindex="-1" onclick="switchSettingsTab('colmap')"><svg class="icon" aria-hidden="true"><use href="#i-cube"/></svg><span><strong>COLMAP</strong><small>Fitur &amp; pencocokan</small></span></button>
-          <button id="tab-training" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-training" tabindex="-1" onclick="switchSettingsTab('training')"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span><strong>Training</strong><small>GPU &amp; SuGaR</small></span></button>
+          <button id="tab-dgs" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-dgs" tabindex="-1" onclick="switchSettingsTab('dgs')"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span><strong>3DGS</strong><small>Optimasi & densifikasi</small></span></button>
+          <button id="tab-sugar" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-sugar" tabindex="-1" onclick="switchSettingsTab('sugar')"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span><strong>SuGaR</strong><small>Mesh & refinement</small></span></button>
+          <button id="tab-training" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-training" tabindex="-1" onclick="switchSettingsTab('training')"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span><strong>Eksekusi</strong><small>GPU & pemulihan</small></span></button>
           <button id="tab-lidar" class="settings-tab" role="tab" aria-selected="false" aria-controls="pane-lidar" tabindex="-1" onclick="switchSettingsTab('lidar')"><svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg><span><strong>Evaluasi LiDAR</strong><small>Opsional</small></span></button>
         </div>
         <div class="settings-content">
@@ -492,12 +494,21 @@
           <div class="capability-line"><button id="btnCheckColmap" class="btn btn-ghost btn-sm" onclick="checkColmap()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Periksa COLMAP</button><p id="colmapCapability" role="status">Memeriksa build COLMAP server...</p></div>
           <p class="settings-note">Sequential butuh nama file berurutan, misalnya frame_00001.jpg.</p>
         </div>
-        <div id="pane-training" class="settings-pane" role="tabpanel" aria-labelledby="tab-training" tabindex="0" hidden>
-          <div class="pane-heading"><h3>Training</h3><p>Hanya SuGaR yang bisa diatur. Pakai nilai yang sama untuk semua patung.</p></div>
-          <div class="settings-group"><h4 class="settings-group-heading">Perangkat</h4><div class="field-grid">
-            <label for="gpuId">GPU ID<input id="gpuId" type="number" min="0" step="1" value="0"><small>Sesuai nvidia-smi.</small></label>
-            <div class="setting-readonly"><span>Baseline 3DGS</span><strong>30.000 iterasi</strong><small>Tetap.</small></div>
-          </div></div>
+        <div id="pane-dgs" class="settings-pane" role="tabpanel" aria-labelledby="tab-dgs" tabindex="0" hidden>
+          <div class="pane-heading"><h3>Pelatihan 3DGS</h3><p>Parameter tetap yang digunakan pipeline saat ini. Berlaku untuk 3DGS baseline dan 3DGS dengan inisialisasi anchor Scaffold.</p></div>
+          <div class="settings-group"><h4 class="settings-group-heading">Optimasi dan pengendalian kepadatan</h4><div class="field-grid"><div class="setting-readonly"><span>Jumlah iterasi</span><strong>30.000</strong><small>Checkpoint 7.000 untuk tahap awal SuGaR.</small></div>
+<div class="setting-readonly"><span>Optimizer</span><strong>Adam</strong><small>Optimasi parameter Gaussian.</small></div>
+<div class="setting-readonly"><span>Derajat maksimum SH</span><strong>3</strong><small>Representasi warna berdasarkan arah pandang.</small></div>
+<div class="setting-readonly"><span>Fungsi loss</span><strong>L1 + D-SSIM</strong><small>Bobot L1 0,8 dan D-SSIM 0,2.</small></div>
+<div class="setting-readonly"><span>Rentang densifikasi</span><strong>500 - 15.000 iterasi</strong><small>Batas jadwal; dijalankan sesuai interval.</small></div>
+<div class="setting-readonly"><span>Interval densifikasi</span><strong>100 iterasi</strong><small>Penambahan dan pemangkasan Gaussian.</small></div>
+<div class="setting-readonly"><span>Ambang gradien densifikasi</span><strong>0,0002</strong><small>Ambang gradien posisi di ruang citra.</small></div>
+<div class="setting-readonly"><span>Reset opasitas</span><strong>3.000 iterasi</strong><small>Interval pengaturan ulang opasitas.</small></div></div></div>
+          <div class="settings-group"><h4 class="settings-group-heading">Resolusi citra pelatihan</h4><p id="dgsResolutionSummary" class="settings-note"></p><button type="button" class="btn btn-ghost btn-sm" onclick="switchSettingsTab('resolution', true)">Atur resolusi foto</button></div>
+          <p class="settings-note">Nilai di atas ditampilkan untuk dokumentasi, belum dapat diedit dari dashboard. Resolusi, GPU, dan pemulihan diatur pada kategori masing-masing. Hasil training lama mengikuti konfigurasi saat pekerjaan tersebut dijalankan.</p>
+        </div>
+        <div id="pane-sugar" class="settings-pane" role="tabpanel" aria-labelledby="tab-sugar" tabindex="0" hidden>
+          <div class="pane-heading"><h3>Pelatihan SuGaR</h3><p>Atur regularisasi, mesh, refinement, dan ekspor. Gunakan konfigurasi yang konsisten untuk seluruh patung dalam satu eksperimen.</p></div>
           <div class="settings-group"><h4 class="settings-group-heading">Parameter SuGaR</h4><div class="field-grid">
             <label for="refinementTime">Refinement<select id="refinementTime"><option value="short">Short · 2.000 iterasi</option><option value="medium">Medium · 7.000 iterasi</option><option value="long" selected>Long · 15.000 iterasi</option></select></label>
             <label for="meshTriangles">Budget mesh<input id="meshTriangles" type="number" min="1000" max="2000000" step="1000" value="1000000"><small>Budget decimation, bukan jumlah akhir.</small></label>
@@ -519,8 +530,12 @@
             <label for="qualityBackground">Segitiga background<input id="qualityBackground" type="number" min="0" max="20000000" step="100000" value="2000000"><small>OOM? Turunkan ke 1000000.</small></label>
             </div>
             <details class="hint"><summary>Apa yang diulang?</summary><p>Hanya ekstraksi mesh dan refinement. COLMAP, 3DGS, dan coarse tidak diulang. Tetap SuGaR murni: semua Gaussian terikat mesh. Hasil disimpan di outputs/quality/sugar/ tanpa menimpa baseline, dan perbandingan PSNR/SSIM/LPIPS tercetak di log.</p></details>
-            <div class="capability-line"><button id="btnQueueSugarQuality" type="button" class="btn btn-primary btn-sm" onclick="queueSugarQuality()">Antrekan optimasi SuGaR</button><p id="qualityStatus" role="status">Memakai GPU ID dan opsi lewati tahap di atas.</p></div>
+            <div class="capability-line"><button id="btnQueueSugarQuality" type="button" class="btn btn-primary btn-sm" onclick="queueSugarQuality()">Antrekan optimasi SuGaR</button><p id="qualityStatus" role="status">Memakai GPU ID dan opsi pemulihan pada kategori Eksekusi.</p></div>
           </div>
+        </div>
+        <div id="pane-training" class="settings-pane" role="tabpanel" aria-labelledby="tab-training" tabindex="0" hidden>
+          <div class="pane-heading"><h3>Eksekusi dan pemulihan</h3><p>Pengaturan bersama untuk menjalankan pekerjaan training.</p></div>
+          <div class="field-grid field-single"><label for="gpuId">GPU ID<input id="gpuId" type="number" min="0" step="1" value="0"><small>Sesuai nvidia-smi pada server.</small></label></div>
           <label class="checkbox-label"><input id="resumeCompleted" type="checkbox" checked><span><strong>Lewati tahap yang sudah selesai</strong><small>Matikan untuk training dari awal. Jika foto diganti, ulangi COLMAP.</small></span></label>
         </div>
         <div id="pane-lidar" class="settings-pane" role="tabpanel" aria-labelledby="tab-lidar" tabindex="0" hidden>
@@ -613,7 +628,7 @@
         <p>Scan di <code>datasets/&lt;kelas&gt;/&lt;model&gt;/ground_truth/lidar.ply</code>.</p>
         <div class="calibration-scroll" tabindex="0" role="region" aria-label="Satuan LiDAR per model"><table><thead><tr><th>Model &amp; berkas</th><th>Satuan LiDAR</th><th id="geometryScaleHeading">Skala manual (meter/unit)</th></tr></thead><tbody id="geometryCalibrationBody"></tbody></table></div>
         <p id="queueAlignmentNote" class="alignment-note"></p>
-        <label id="queueWeakOption" class="checkbox-label"><input id="queueAllowWeak" type="checkbox" onchange="updateQueuePlan()"><span><strong>Tetap hitung walau alignment lemah</strong><small>Overlap &lt;35% tidak menghentikan evaluasi. Skor ditandai <code>alignment_passed=false</code>; jangan dilaporkan sebagai hasil akhir.</small></span></label>
+        <label id="queueWeakOption" class="checkbox-label"><input id="queueAllowWeak" type="checkbox" onchange="updateQueuePlan()"><span><strong>Tetap hitung walau alignment lemah</strong><small>Overlap &lt;35% tidak menghentikan evaluasi; skor tetap dihitung dan disimpan.</small></span></label>
         <div class="calibration-actions"><button id="queueSaveCalibration" type="button" class="btn btn-ghost btn-sm" onclick="saveQueueCalibration()">Simpan pengaturan LiDAR</button><span class="settings-note" style="margin:0">Disimpan per model, tidak memulai evaluasi.</span></div>
         <label id="queueIcpOption" class="checkbox-label"><input id="queueApplyIcp" type="checkbox" checked><span><strong>Perbaiki posisi &amp; rotasi dengan ICP</strong><small>Matikan jika sudah sejajar dengan LiDAR.</small></span></label>
       </section>

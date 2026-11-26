@@ -1030,3 +1030,31 @@ test('geometry skips current results but requeues when units change', async () =
   assert.match(app.nodes.get('queuePlanSummary').textContent, /4 evaluasi metode/);
   assert.equal(app.nodes.get('queueDialogSubmit').disabled, false);
 });
+
+test('settings separate 3DGS, SuGaR and shared execution without resetting values', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  app.nodes.get('meshTriangles').value = '750000';
+  vm.runInContext("switchSettingsTab('dgs')", app.context);
+  assert.equal(app.nodes.get('pane-dgs').hidden, false);
+  assert.equal(app.nodes.get('pane-sugar').hidden, true);
+  app.nodes.get('tab-dgs').onkeydown({key: 'ArrowDown', preventDefault() {}});
+  assert.equal(app.nodes.get('pane-sugar').hidden, false);
+  assert.equal(app.nodes.get('pane-dgs').hidden, true);
+  assert.equal(app.nodes.get('meshTriangles').value, '750000');
+  vm.runInContext("switchSettingsTab('training')", app.context);
+  assert.equal(app.nodes.get('pane-training').hidden, false);
+  assert.equal(app.nodes.get('pane-sugar').hidden, true);
+  const html = fs.readFileSync('web_dashboard/index.html', 'utf8');
+  const pane = id => html.split(`id="pane-${id}"`)[1].split('id="pane-')[0];
+  assert.match(pane('dgs'), /Adam/);
+  assert.match(pane('dgs'), /0,0002/);
+  assert.match(pane('dgs'), /belum dapat diedit/);
+  assert.match(pane('sugar'), /id="meshTriangles"/);
+  assert.doesNotMatch(pane('sugar'), /id="gpuId"/);
+  assert.match(pane('training'), /id="gpuId"/);
+  assert.match(pane('training'), /id="resumeCompleted"/);
+  const ids = [...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(ids.length, new Set(ids).size);
+  assert.match(app.nodes.get('dgsResolutionSummary').textContent, /1600 x 900/);
+});

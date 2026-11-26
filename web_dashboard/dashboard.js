@@ -106,7 +106,7 @@ const actionLabel = action => ({full_pipeline: 'Pipeline lengkap', colmap: 'Reko
   '2dgs': '2DGS + evaluasi', radegs: 'RaDe-GS + evaluasi', '3dgs': 'Training 3DGS', sugar: 'Training SuGaR',
   sugar_quality: 'Optimasi SuGaR', extract_frames: 'Ekstraksi frame',
   evaluate_visual: 'Evaluasi visual', evaluate: 'Evaluasi geometri'}[action] || action || '');
-const settingsTabs = ['resolution', 'colmap', 'training', 'lidar'];
+const settingsTabs = ['resolution', 'colmap', 'dgs', 'sugar', 'training', 'lidar'];
 const isFilePreview = window.location?.protocol === 'file:' || window.location?.search === '?preview=1';
 const previewMessage = 'Pratinjau desain lokal. Data penelitian dan eksekusi pipeline tersedia melalui dashboard yang berjalan di server.';
 
@@ -291,6 +291,7 @@ function updateSettings(custom = true) {
     const trainingFactor = Math.max(downscale, cap ? Math.max(width, height) / cap : 1);
     $('resolutionPreview').textContent = `Acuan ${width} × ${height} px → fitur COLMAP ≈ ${size(Math.max(1, Math.max(width, height) / colmapCap))} px; training & evaluasi ≈ ${size(trainingFactor)} px. Foto asli tidak diubah.`;
   } else $('resolutionPreview').textContent = 'Isi ukuran acuan dan pengaturan resolusi yang valid untuk melihat perkiraan.';
+  $('dgsResolutionSummary').textContent = $('resolutionPreview').textContent + ' Ukuran 1600 x 900 berlaku untuk acuan 16:9 dengan batas 1600 px dan downscale 1.';
   renderSettingsSummary();
   try {
     const values = Object.fromEntries(settingControls.map(id => [id, id === 'resumeCompleted' ? $(id).checked : $(id).value]));
@@ -1146,7 +1147,7 @@ function renderMetrics() {
     $(target).textContent = values.length ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(digits) + unit : '—';
     $(context).textContent = `${values.length ? 'Rata-rata ' + values.length + ' hasil' : 'Belum dievaluasi'} · ${explanation}`;
   }
-  $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${[...selectedMetricMethods].join(' + ') || 'tidak ada metode'}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri ablasi belum tersedia melalui dashboard.'}`;
+  $('metricScope').textContent = `${metricExperiment === 'baseline' ? 'Baseline' : 'Studi ablasi'} · Rata-rata hasil terakhir per model/metode · ${[...selectedMetricMethods].join(' + ') || 'tidak ada metode'}. ${metricExperiment === 'baseline' ? 'Geometri memerlukan LiDAR.' : 'Waktu training belum termasuk tahap Scaffold. Evaluasi geometri tersedia melalui pilihan Ablasi Scaffold di popup antrean.'}`;
   for (const [id, label] of [['precisionHeader', 'Precision'], ['recallHeader', 'Recall'], ['f1Header', 'F1']]) {
     $(id).textContent = `${label} @${threshold}cm (%)`;
   }

@@ -549,6 +549,7 @@ function openQueueDialog(cls = '', mdl = '', action = 'full_pipeline') {
     .map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
   $('queueClass').value = cls;
   populateQueueModels(mdl);
+  $('queueGeometryExperiment').value = 'baseline';
   $('queueMethod').value = $('evaluationMethod').value || 'both';
   for (const method of ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']) {
     $('queueGeometry-' + method).checked = $('queueMethod').value === 'both'
@@ -583,6 +584,11 @@ function changeQueueTarget(classChanged) {
     ? 'full_pipeline' : selectedQueueAction);
 }
 
+function geometrySources(info) {
+  const experiment = $('queueGeometryExperiment').value || 'baseline';
+  return info.geometry_sources_by_experiment?.[experiment] || (experiment === 'baseline' ? info.geometry_sources : {}) || {};
+}
+
 function renderQueueTargets() {
   const {class_name: cls, model_id: mdl} = queueSelection;
   const pairs = selectedModelPairs();
@@ -594,7 +600,7 @@ function renderQueueTargets() {
   for (const {cls, mdl, info} of pairs) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.innerHTML = `${modelIdentityHtml(cls, mdl)}<div class="geometry-file-state">${chip(info.has_gt_lidar, 'LiDAR ada', 'LiDAR belum ada')}${chip(info.geometry_sources?.['3DGS'], '3DGS ada', '3DGS belum ada')}${chip(info.geometry_sources?.SuGaR, 'SuGaR ada', 'SuGaR belum ada')}</div>`;
+    cell.innerHTML = `${modelIdentityHtml(cls, mdl)}<div class="geometry-file-state">${chip(info.has_gt_lidar, 'LiDAR ada', 'LiDAR belum ada')}${['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'].map(method => chip(geometrySources(info)[method], method + ' ada', method + ' belum ada')).join('')}</div>`;
     row.appendChild(cell);
     let inputs = geometryInputs.get(`${cls}/${mdl}`);
     if (!inputs) {
@@ -692,7 +698,7 @@ function queuePlan() {
         if (!info.has_gt_lidar) reason = 'ground_truth/lidar.ply belum tersedia';
         else if (!['m', 'cm', 'mm'].includes(inputs?.unit.value)) reason = 'pilih satuan koordinat LiDAR';
         else if ($('queueAlignment').value === 'manual' && (!text || !Number.isFinite(Number(text)) || Number(text) <= 0)) reason = 'isi faktor skala manual positif';
-        else if (!info.geometry_sources?.[method]) reason = `hasil rekonstruksi ${method} belum tersedia`;
+        else if (!geometrySources(info)[method]) reason = `hasil rekonstruksi ${method} belum tersedia`;
       }
       const target = `${modelName(cls, mdl)} (${cls}/${mdl}${method ? ' · ' + method : ''})`;
       if (reason) skipped.push(`${target}: ${reason}`);
@@ -726,6 +732,7 @@ function updateQueuePlan() {
   $('queueMethod').disabled = busy;
   for (const method of ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']) $('queueGeometry-' + method).disabled = busy;
   $('queueGeometrySelectAll').disabled = busy;
+  $('queueGeometryExperiment').disabled = busy;
   $('queuePipelineStart').disabled = busy;
   $('queueExternalOptions').hidden = !(['2dgs', 'radegs'].includes(selectedQueueAction) || (selectedQueueAction === 'evaluate_visual' && ['2DGS', 'RaDe-GS'].includes($('queueMethod').value)));
   const scaffoldSelected = $('queueExperiment').value === 'scaffold_anchor';
@@ -790,7 +797,7 @@ async function submitQueueDialog() {
   const action = selectedQueueAction;
   const payload = {...readExperimentSettings(), ...queueSelection, action,
     pipeline_start: action === 'full_pipeline' ? $('queuePipelineStart').value : 'auto',
-    experiment: action === 'full_pipeline' ? $('queueExperiment').value : 'baseline',
+    experiment: action === 'evaluate' ? $('queueGeometryExperiment').value : action === 'full_pipeline' ? $('queueExperiment').value : 'baseline',
     skip_sugar: action === 'full_pipeline' && $('queueMethods').value === 'without_sugar',
     include_external: true,
     python_2dgs: ($('queuePython2dgs').value || '').trim(),

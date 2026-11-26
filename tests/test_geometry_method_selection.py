@@ -1,19 +1,20 @@
 """Selection validation and expansion without GPU or filesystem fixtures."""
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from web_dashboard.server import prepare_jobs
+from web_dashboard.server import prepare_jobs, build_command
 
 
 class GeometryMethodSelectionTests(unittest.TestCase):
-    def jobs(self, methods):
+    def jobs(self, methods, experiment='baseline'):
         with patch('web_dashboard.server.scene_pairs', return_value=[('Dewa', 'model_01')]), \
                 patch('web_dashboard.server.read_geometry_scales', return_value={}), \
                 patch('web_dashboard.server.read_geometry_settings', return_value={}), \
                 patch('web_dashboard.server.nonempty_file', return_value=True), \
                 patch('web_dashboard.server.geometry_source_ready', return_value=True):
             return prepare_jobs(dict(action='evaluate', class_name='Dewa', model_id='model_01',
-                evaluation_methods=methods,
+                evaluation_methods=methods, experiment=experiment,
                 geometry_options={'lidar_unit': 'm', 'alignment_mode': 'automatic'}))
 
     def test_all_methods_create_individual_jobs(self):
@@ -25,6 +26,18 @@ class GeometryMethodSelectionTests(unittest.TestCase):
     def test_subset_deduplicated(self):
         jobs, _ = self.jobs(['2DGS', 'RaDe-GS', '2DGS'])
         self.assertEqual([job['evaluation_method'] for job in jobs], ['2DGS', 'RaDe-GS'])
+
+    def test_scaffold_geometry_routes_all_methods_without_training_setup(self):
+        methods = ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']
+        jobs, skipped = self.jobs(methods, 'scaffold_anchor')
+        self.assertEqual(len(jobs), 4)
+        self.assertEqual(skipped, [])
+        for job in jobs:
+            with patch.object(Path, 'read_text', return_value='{"surface_mesh":"mesh/statue.ply"}'):
+                command = build_command(job)
+            self.assertEqual(command[command.index('--experiment') + 1], 'scaffold_anchor')
+            self.assertIn('outputs/ablations/scaffold_anchor/', command[command.index('-p') + 1].replace('\\', '/'))
+            self.assertIn('datasets/Dewa/model_01/ground_truth/lidar.ply', command[command.index('-g') + 1].replace('\\', '/'))
 
     def test_empty_and_invalid_selections_rejected(self):
         for methods in ([], 'all', ['both'], [None], [['3DGS']]):

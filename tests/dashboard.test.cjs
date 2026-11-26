@@ -975,3 +975,27 @@ test('geometry checkboxes support all methods, subsets, and empty selection', as
   await vm.runInContext('submitQueueDialog()', app.context);
   assert.deepEqual(app.calls.find(([url]) => url === '/api/run')[1].evaluation_methods, ['2DGS', 'RaDe-GS']);
 });
+
+test('geometry shows all four source badges and routes Scaffold selection independently', async () => {
+  const app = page();
+  app.setModel('Dewa', 'model_01', {has_gt_lidar: true,
+    geometry_sources: {'3DGS': true, SuGaR: true},
+    geometry_sources_by_experiment: {
+      baseline: {'3DGS': true, SuGaR: true},
+      scaffold_anchor: {'3DGS': false, SuGaR: false, '2DGS': true, 'RaDe-GS': true}},
+    geometry_settings: {lidar_unit: 'm', alignment_mode: 'automatic'}});
+  await app.events.DOMContentLoaded();
+  vm.runInContext("openQueueDialog('Dewa', 'model_01', 'evaluate'); selectAllGeometryMethods()", app.context);
+  let badges = app.nodes.get('geometryCalibrationBody').children[0].children[0].innerHTML;
+  assert.match(badges, /2DGS belum ada/);
+  assert.match(badges, /RaDe-GS belum ada/);
+  app.nodes.get('queueGeometryExperiment').value = 'scaffold_anchor';
+  vm.runInContext('renderQueueTargets(); updateQueuePlan()', app.context);
+  badges = app.nodes.get('geometryCalibrationBody').children[0].children[0].innerHTML;
+  assert.match(badges, /2DGS ada/);
+  assert.match(badges, /RaDe-GS ada/);
+  assert.match(badges, /3DGS belum ada/);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /2 pekerjaan/);
+  await vm.runInContext('submitQueueDialog()', app.context);
+  assert.equal(app.calls.find(([url]) => url === '/api/run')[1].experiment, 'scaffold_anchor');
+});

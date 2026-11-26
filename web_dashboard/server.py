@@ -70,6 +70,14 @@ def get_project_status(root=PROJECT_ROOT):
                               for key in ('sugar',)},
             "geometry_sources": {method: geometry_source_ready(root, cls, mdl, method)
                                  for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')},
+            "geometry_sources_by_experiment": {experiment: {
+                method: geometry_source_ready(root, cls, mdl, method, experiment)
+                for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')}
+                for experiment in ('baseline', 'scaffold_anchor')},
+            "geometry_methods_by_experiment": {experiment: {
+                method: geometry_result_current(root, cls, mdl, method, scale, options, experiment)
+                for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')}
+                for experiment in ('baseline', 'scaffold_anchor')},
             "geometry_methods": geometry_methods, "geometry_evaluated": all(geometry_methods.values()),
             "colmap_done": has_colmap_model(scene), "3dgs_7k": has_checkpoint(dgs, 7000),
             "3dgs_30k": dgs_done, "sugar_mesh": any((sugar / "mesh").glob("*.ply")),
@@ -217,9 +225,9 @@ def build_command(job, root=PROJECT_ROOT):
         script, args = "06_evaluate_rendering.py", [*common, *gpu, "--method", job["evaluation_method"]]
     elif action == "evaluate":
         method = job["evaluation_method"]
-        model = geometry_model_path(root, cls, mdl, method)
+        model = geometry_model_path(root, cls, mdl, method, job.get("experiment", "baseline"))
         script, args = "05_evaluate_comparison.py", [*common, "--method", method, "-p", str(model),
-            "-g", str(scene / "ground_truth/lidar.ply")]
+            "-g", str(scene / "ground_truth/lidar.ply"), "--experiment", job.get("experiment", "baseline")]
         options = job.get('geometry_options')
         if options:
             args.extend(['--lidar_unit', options['lidar_unit']])
@@ -249,7 +257,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     if experiment not in ('baseline', 'scaffold_anchor'):
         raise ValueError('Eksperimen harus baseline atau scaffold_anchor.')
     scaffold = {}
-    if experiment == 'scaffold_anchor':
+    if experiment == 'scaffold_anchor' and action != 'evaluate':
         if action != 'full_pipeline':
             raise ValueError('Eksperimen Scaffold dijalankan melalui Pipeline lengkap.')
         repo = data.get('scaffold_repo')
@@ -409,7 +417,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                     reason = 'ground_truth/lidar.ply belum tersedia'
                 elif scale is None and options is None:
                     reason = 'pilih satuan LiDAR dan penyelarasan otomatis, atau isi kalibrasi manual'
-                elif not geometry_source_ready(root, cls, mdl, current_method):
+                elif not geometry_source_ready(root, cls, mdl, current_method, experiment):
                     reason = f'hasil rekonstruksi {current_method} belum tersedia'
             elif action == 'evaluate_visual':
                 baseline = Path(root) / 'outputs/3dgs' / cls / mdl

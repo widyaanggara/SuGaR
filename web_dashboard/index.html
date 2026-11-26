@@ -589,6 +589,7 @@
       </section>
       <section id="queueMethodOptions" class="queue-block queue-method-options" hidden><div class="queue-block-heading"><h3><span class="queue-step">3</span>Metode</h3></div><label id="queueVisualMethod" for="queueMethod">Metode yang dievaluasi<select id="queueMethod" onchange="updateQueuePlan()"><option value="both">3DGS dan SuGaR</option><option value="3DGS">3DGS saja</option><option value="SuGaR">SuGaR saja</option><option value="2DGS">2DGS saja</option><option value="RaDe-GS">RaDe-GS saja</option></select></label>
         <div id="queueGeometryMethods" hidden>
+          <label>Hasil yang dievaluasi<select id="queueGeometryExperiment" onchange="renderQueueTargets(); updateQueuePlan()"><option value="baseline">Baseline</option><option value="scaffold_anchor">Ablasi Scaffold</option></select></label>
           <p>Pilih satu atau beberapa metode yang dievaluasi.</p>
           <div class="geometry-method-checks" role="group" aria-label="Metode evaluasi geometri">
             <label><input id="queueGeometry-3DGS" type="checkbox" onchange="updateQueuePlan()">3DGS</label>

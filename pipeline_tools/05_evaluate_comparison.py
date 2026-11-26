@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from pipeline_tools.logger_utils import ThesisLogger
+from pipeline_tools.external_methods import output_base
 from pipeline_tools.geometry_metrics import metrics_from_distances
 from pipeline_tools.dataset_registry import file_signature
 from pipeline_tools.geometry_config import LIDAR_UNITS
@@ -177,9 +178,11 @@ def main():
     parser.add_argument("--lpips", type=float, default=None, help="Nilai LPIPS.")
     parser.add_argument("--num_elements", type=int, default=None, help="Jumlah partikel Gaussians atau vertex mesh.")
 
+    parser.add_argument("--experiment", choices=("baseline", "scaffold_anchor"), default="baseline")
     args = parser.parse_args()
 
-    logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id, method=args.method)
+    method_label = args.method + ("_scaffold_anchor" if args.experiment == "scaffold_anchor" else "")
+    logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id, method=method_label)
     logger.log(f"Memulai evaluasi metrik untuk {args.method} - {args.statue_class}/{args.model_id}")
 
     model_path = Path(args.model_path)
@@ -218,7 +221,7 @@ def main():
     # 1. Evaluasi Geometri jika ada Ground Truth LiDAR
     if args.gt_lidar:
         logger.start_stage("Evaluasi_Geometri_LiDAR")
-        aligned_out = (PROJECT_ROOT / 'outputs' / args.method.replace("-", "").lower() / args.statue_class /
+        aligned_out = (output_base(PROJECT_ROOT, args.experiment) / args.method.replace("-", "").lower() / args.statue_class /
                        args.model_id / 'geometry/aligned_reconstruction.ply')
         try:
             logger.log('Mencari skala, rotasi dan posisi otomatis (Sim(3)); periksa overlay hasilnya.' if args.auto_align
@@ -247,7 +250,7 @@ def main():
                            f"Recall: {geo_metrics[f'recall_at_{threshold}cm_pct']:.4f}%, "
                            f"F1: {geo_metrics[f'f1_at_{threshold}cm_pct']:.4f}%")
             logger.set_geometry_metrics(geo_metrics)
-            report = dict(geo_metrics, method=args.method, statue_class=args.statue_class, model_id=args.model_id,
+            report = dict(geo_metrics, experiment=args.experiment, method=args.method, statue_class=args.statue_class, model_id=args.model_id,
                 model_path=str(model_path.resolve()), model_signature=file_signature(model_path),
                 gt_lidar_path=str(Path(args.gt_lidar).resolve()), gt_signature=file_signature(Path(args.gt_lidar)),
                 aligned_model_path=str(aligned_out),
@@ -257,7 +260,7 @@ def main():
                 geometry_options=dict(lidar_unit=args.lidar_unit,
                     alignment_mode='automatic' if args.auto_align else 'manual',
                     **({} if args.auto_align else {'scale_factor': args.scale_factor})))
-            geometry_dir = PROJECT_ROOT / 'outputs' / args.method.replace("-", "").lower() / args.statue_class / args.model_id / 'geometry'
+            geometry_dir = output_base(PROJECT_ROOT, args.experiment) / args.method.replace("-", "").lower() / args.statue_class / args.model_id / 'geometry'
             geometry_dir.mkdir(parents=True, exist_ok=True)
             temporary = geometry_dir / 'metrics.json.tmp'
             temporary.write_text(json.dumps(report, indent=2), encoding='utf-8')

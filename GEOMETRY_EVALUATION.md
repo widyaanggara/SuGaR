@@ -2,6 +2,16 @@
 
 ## Dashboard
 
+Evaluasi geometri menyediakan pilihan **Hasil yang dievaluasi: Baseline / Ablasi
+Scaffold**, lalu checkbox 3DGS, SuGaR, 2DGS, dan RaDe-GS. Tombol **Pilih semua
+metode** memilih keempatnya. Status sumber di baris LiDAR mengikuti eksperimen
+terpilih; 2DGS dan RaDe-GS memerlukan mesh hasil ekstraksi, bukan checkpoint saja.
+Ground truth tetap sama di folder dataset. Hasil Scaffold disimpan terpisah pada
+`outputs/ablations/scaffold_anchor/<metode>/<kelas>/<model>/geometry/`, dan label
+rekap metrik memakai akhiran `_scaffold_anchor`. CLI mendukung
+`--experiment scaffold_anchor` (default `baseline`). Evaluasi ini tidak melatih
+ulang Scaffold atau memerlukan environment training Scaffold.
+
 1. Simpan point cloud **hasil LiDAR** dari SLAM GO POST, bukan model 3DGS dari software itu, pada `datasets/<kelas>/<model>/ground_truth/lidar.ply`.
 2. Klik **Antrekan Model** di kanan atas. Pilih semua kelas, satu kelas, atau satu model. Tombol **Antrekan model ini** pada kartu langsung memilih model tersebut.
 3. Pilih **Evaluasi geometri**, lalu 3DGS, SuGaR, atau keduanya.

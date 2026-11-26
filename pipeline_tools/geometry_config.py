@@ -152,14 +152,16 @@ def save_geometry_scales(entries, root=PROJECT_ROOT):
     return scales
 
 
-def geometry_model_path(root, cls, mdl, method):
+def geometry_model_path(root, cls, mdl, method, experiment="baseline"):
+    from pipeline_tools.external_methods import output_base
+    base = output_base(root, experiment)
     if method in ('2DGS', 'RaDe-GS'):
         from pipeline_tools.external_methods import mesh_path
         key = method.replace('-', '').lower()
-        return mesh_path(Path(root) / 'outputs' / key / cls / mdl, key)
+        return mesh_path(base / key / cls / mdl, key)
     if method not in METHODS:
         raise ValueError('Metode geometri harus 3DGS atau SuGaR.')
-    output = Path(root) / 'outputs' / method.lower() / cls / mdl
+    output = base / method.lower() / cls / mdl
     if method == '3DGS':
         return output / 'point_cloud/iteration_30000/point_cloud.ply'
     manifest = json.loads((output / 'pipeline_result.json').read_text(encoding='utf-8'))
@@ -176,23 +178,24 @@ def nonempty_file(path):
     return path.is_file() and path.stat().st_size > 0
 
 
-def geometry_source_ready(root, cls, mdl, method):
+def geometry_source_ready(root, cls, mdl, method, experiment="baseline"):
     try:
-        return nonempty_file(geometry_model_path(root, cls, mdl, method))
+        return nonempty_file(geometry_model_path(root, cls, mdl, method, experiment))
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
 
-def geometry_result_current(root, cls, mdl, method, scale, options=None):
+def geometry_result_current(root, cls, mdl, method, scale, options=None, experiment="baseline"):
     if scale is None and options is None:
         return False
     try:
-        output = Path(root) / 'outputs' / method.replace('-', '').lower() / cls / mdl
+        from pipeline_tools.external_methods import output_base
+        output = output_base(root, experiment) / method.replace('-', '').lower() / cls / mdl
         report = json.loads((output / 'geometry/metrics.json').read_text(encoding='utf-8'))
         gt = Path(root) / 'datasets' / cls / mdl / 'ground_truth/lidar.ply'
         metrics = ('chamfer_distance_cm',) + tuple(f'{name}_at_{threshold}cm_pct'
             for threshold in (2, 5) for name in ('precision', 'recall', 'f1'))
-        return (report['model_signature'] == file_signature(geometry_model_path(root, cls, mdl, method))
+        return (report['model_signature'] == file_signature(geometry_model_path(root, cls, mdl, method, experiment))
                 and report['gt_signature'] == file_signature(gt)
                 and (report.get('geometry_options') == options if options is not None else
                      report['scale_factor_to_meters'] == scale)

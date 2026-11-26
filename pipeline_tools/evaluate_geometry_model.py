@@ -8,6 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from web_dashboard.server import build_command
+from pipeline_tools.geometry_config import geometry_result_current
 
 
 def run(job, root=ROOT):
@@ -26,6 +27,12 @@ def run(job, root=ROOT):
         single = {key: value for key, value in job.items() if key != 'evaluation_methods'}
         single.update(action='evaluate', evaluation_method=method)
         try:
+            if geometry_result_current(root, job['class_name'], job['model_id'], method,
+                    job.get('scale_factor'), job.get('geometry_options'),
+                    job.get('experiment', 'baseline'), apply_icp=job.get('apply_icp', True)):
+                print(f'[LEWATI] {method}: evaluasi sudah selesai dan masih sesuai.', flush=True)
+                results.append((method, True, 'DILEWATI: hasil valid sudah tersedia'))
+                continue
             command = build_command(single, root)
             print('[RUN] ' + subprocess.list2cmdline(command), flush=True)
             # Inherit stdout/stderr: all child diagnostics belong to this statue's queue log.

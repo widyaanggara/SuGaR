@@ -65,6 +65,7 @@ def get_project_status(root=PROJECT_ROOT):
             "has_gt_lidar": nonempty_file(scene / "ground_truth/lidar.ply"),
             "geometry_scale_factor": scale,
             "geometry_settings": options,
+            "geometry_resume_settings": options,
             "object_region": region,
             "object_meshes": {key: object_status(root / 'outputs' / key / cls / mdl, region)
                               for key in ('sugar',)},
@@ -77,6 +78,10 @@ def get_project_status(root=PROJECT_ROOT):
             "geometry_methods_by_experiment": {experiment: {
                 method: geometry_result_current(root, cls, mdl, method, scale, options, experiment)
                 for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')}
+                for experiment in ('baseline', 'scaffold_anchor')},
+            "geometry_resume_by_experiment": {experiment: {str(icp).lower(): {
+                method: geometry_result_current(root, cls, mdl, method, scale, options, experiment, apply_icp=icp)
+                for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')} for icp in (True, False)}
                 for experiment in ('baseline', 'scaffold_anchor')},
             "geometry_methods": geometry_methods, "geometry_evaluated": all(geometry_methods.values()),
             "colmap_done": has_colmap_model(scene), "3dgs_7k": has_checkpoint(dgs, 7000),
@@ -424,6 +429,9 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                     reason = 'pilih satuan LiDAR dan penyelarasan otomatis, atau isi kalibrasi manual'
                 elif not geometry_source_ready(root, cls, mdl, current_method, experiment):
                     reason = f'hasil rekonstruksi {current_method} belum tersedia'
+                elif geometry_result_current(root, cls, mdl, current_method, scale, options,
+                                             experiment, apply_icp=apply_icp):
+                    reason = f'evaluasi geometri {current_method} sudah selesai dan masih sesuai; dilewati'
             elif action == 'evaluate_visual':
                 baseline = Path(root) / 'outputs/3dgs' / cls / mdl
                 ready = (has_checkpoint(baseline, 30000) if current_method == '3DGS' else

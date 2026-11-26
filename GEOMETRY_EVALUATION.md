@@ -7,8 +7,11 @@ eksperimen**. Metode yang siap dijalankan berurutan dalam satu log dengan
 penanda `[1/N]` dan ringkasan status per metode di akhir. Kegagalan satu metode
 tidak menghentikan metode berikutnya; pekerjaan keseluruhan berstatus FAILED
 jika ada metode gagal, sementara skor metode yang berhasil tetap tersimpan.
-Antrekan ulang pekerjaan kelompok akan mengevaluasi ulang metode dalam kelompok
-tersebut, tanpa training ulang. Antrean lama per metode tetap didukung; buat
+Run All melewati evaluasi yang masih valid berdasarkan signature rekonstruksi dan
+LiDAR, satuan, mode alignment, faktor skala manual, pilihan ICP, dan versi
+algoritma otomatis. Hasil baseline dan Scaffold diperiksa terpisah. Pemeriksaan
+diulang ketika pekerjaan kelompok berjalan, sehingga retry hanya menjalankan
+metode yang belum memiliki hasil valid, tanpa training ulang. Antrean lama per metode tetap didukung; buat
 pekerjaan baru dari popup untuk memakai pengelompokan. API mengaktifkannya
 dengan `group_geometry: true`.
 

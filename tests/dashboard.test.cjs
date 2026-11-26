@@ -1013,3 +1013,20 @@ test('grouped geometry queue row lists chosen methods below the job name', async
   assert.match(row.innerHTML, /Metode: 3DGS, SuGaR, 2DGS, RaDe-GS/);
   assert.equal(row.lastElementChild.children[0].textContent, 'Log');
 });
+
+test('geometry skips current results but requeues when units change', async () => {
+  const app = page();
+  const options = {lidar_unit: 'm', alignment_mode: 'automatic'};
+  app.setModel('Dewa', 'model_01', {has_gt_lidar: true,
+    geometry_sources: {'3DGS': true, SuGaR: true, '2DGS': true, 'RaDe-GS': true},
+    geometry_settings: options, geometry_resume_settings: options,
+    geometry_resume_by_experiment: {baseline: {'true': {'3DGS': true, SuGaR: true, '2DGS': true, 'RaDe-GS': true}}}});
+  await app.events.DOMContentLoaded();
+  vm.runInContext("openQueueDialog('Dewa', 'model_01', 'evaluate'); selectAllGeometryMethods()", app.context);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /0 pekerjaan/);
+  assert.equal(app.nodes.get('queueDialogSubmit').disabled, true);
+  assert.match(app.nodes.get('queueSkippedList').innerHTML, /sudah selesai/);
+  vm.runInContext("geometryInputs.get('Dewa/model_01').unit.value = 'mm'; updateQueuePlan()", app.context);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /4 evaluasi metode/);
+  assert.equal(app.nodes.get('queueDialogSubmit').disabled, false);
+});

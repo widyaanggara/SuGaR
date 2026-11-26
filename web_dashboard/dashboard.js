@@ -699,6 +699,16 @@ function queuePlan() {
         else if (!['m', 'cm', 'mm'].includes(inputs?.unit.value)) reason = 'pilih satuan koordinat LiDAR';
         else if ($('queueAlignment').value === 'manual' && (!text || !Number.isFinite(Number(text)) || Number(text) <= 0)) reason = 'isi faktor skala manual positif';
         else if (!geometrySources(info)[method]) reason = `hasil rekonstruksi ${method} belum tersedia`;
+        else {
+          const saved = info.geometry_resume_settings;
+          const mode = $('queueAlignment').value;
+          const sameSettings = saved?.lidar_unit === inputs.unit.value && saved?.alignment_mode === mode
+            && (mode === 'automatic' || Number(saved.scale_factor) === Number(text));
+          const icp = mode === 'automatic' || $('queueApplyIcp').checked;
+          const experiment = $('queueGeometryExperiment').value || 'baseline';
+          if (sameSettings && info.geometry_resume_by_experiment?.[experiment]?.[String(icp)]?.[method])
+            reason = `evaluasi geometri ${method} sudah selesai dan masih sesuai; dilewati`;
+        }
       }
       const target = `${modelName(cls, mdl)} (${cls}/${mdl}${method ? ' · ' + method : ''})`;
       if (reason) skipped.push(`${target}: ${reason}`);
@@ -721,10 +731,10 @@ function updateQueuePlan() {
     return text && (!Number.isFinite(Number(text)) || Number(text) <= 0);
   });
   $('queuePlanSummary').textContent = isFilePreview ? 'Pratinjau lokal — tidak mengirim pekerjaan' : invalidScale ? 'Perbaiki skala manual yang tidak valid' : `${jobCount} pekerjaan siap diantrekan` + (selectedQueueAction === 'evaluate' ? ` (${ready.length} evaluasi metode; satu log per togog)` : '');
-  $('queuePlanNote').textContent = skipped.length ? `${skipped.length} target belum siap dan akan dilewati.` : 'Semua target siap.';
+  $('queuePlanNote').textContent = skipped.length ? `${skipped.length} target dilewati; lihat alasannya di bawah.` : 'Semua target siap.';
   if (selectedQueueAction === 'evaluate' && !selectedGeometryMethods().length) $('queuePlanNote').textContent = 'Pilih setidaknya satu metode.';
   $('queueSkippedDetails').hidden = !skipped.length;
-  $('queueSkippedSummary').textContent = `${skipped.length} target yang belum siap`;
+  $('queueSkippedSummary').textContent = `${skipped.length} target yang dilewati`;
   $('queueSkippedList').innerHTML = skipped.map(reason => `<li>${esc(reason)}</li>`).join('');
   $('queueDialogSubmit').disabled = isFilePreview || busy || invalidScale || !ready.length;
   $('queueDialogSubmit').textContent = queueSubmitting ? 'Menambahkan...' : `Antrekan ${jobCount} pekerjaan`;

@@ -185,7 +185,7 @@ def geometry_source_ready(root, cls, mdl, method, experiment="baseline"):
         return False
 
 
-def geometry_result_current(root, cls, mdl, method, scale, options=None, experiment="baseline"):
+def geometry_result_current(root, cls, mdl, method, scale, options=None, experiment="baseline", apply_icp=None):
     if scale is None and options is None:
         return False
     try:
@@ -201,6 +201,7 @@ def geometry_result_current(root, cls, mdl, method, scale, options=None, experim
                      report['scale_factor_to_meters'] == scale)
                 and (not options or options['alignment_mode'] != 'automatic' or
                      report.get('alignment_algorithm') == ALIGNMENT_VERSION)
+                and (apply_icp is None or report.get('apply_icp') == apply_icp)
                 and all(math.isfinite(float(report[key])) for key in metrics))
     except (OSError, ValueError, KeyError, TypeError):
         return False

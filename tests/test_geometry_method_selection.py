@@ -31,6 +31,29 @@ class GeometryMethodSelectionTests(unittest.TestCase):
         jobs, _ = self.jobs(['2DGS', 'RaDe-GS', '2DGS'])
         self.assertEqual([job['evaluation_method'] for job in jobs], ['2DGS', 'RaDe-GS'])
 
+    def test_group_omits_current_results_but_keeps_unfinished_methods(self):
+        with patch('web_dashboard.server.geometry_result_current',
+                   side_effect=lambda root, cls, mdl, method, *args, **kw: method == '3DGS'):
+            jobs, skipped = self.jobs(['3DGS', '2DGS'], group=True)
+        self.assertEqual(jobs[0]['evaluation_methods'], ['2DGS'])
+        self.assertIn('sudah selesai', skipped[0])
+        with patch('web_dashboard.server.geometry_result_current', return_value=True):
+            jobs, skipped = self.jobs(['3DGS', '2DGS'], group=True)
+        self.assertEqual(jobs, [])
+        self.assertEqual(len(skipped), 2)
+
+    def test_retry_runner_skips_successful_methods_without_launching_them(self):
+        from pipeline_tools.evaluate_geometry_model import run
+        jobs, _ = self.jobs(['3DGS', '2DGS'], group=True)
+        with patch('pipeline_tools.evaluate_geometry_model.geometry_result_current',
+                   side_effect=[True, False]), \
+                patch('pipeline_tools.evaluate_geometry_model.subprocess.run',
+                      return_value=SimpleNamespace(returncode=0)) as process, redirect_stdout(io.StringIO()):
+            self.assertEqual(run(jobs[0]), 0)
+        self.assertEqual(process.call_count, 1)
+        command = process.call_args.args[0]
+        self.assertEqual(command[command.index('--method') + 1], '2DGS')
+
     def test_grouped_geometry_creates_one_job_and_frozen_runner_payload(self):
         jobs, _ = self.jobs(['RaDe-GS', '3DGS', 'SuGaR', '2DGS'], 'scaffold_anchor', group=True)
         self.assertEqual(len(jobs), 1)

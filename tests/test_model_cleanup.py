@@ -23,6 +23,12 @@ class CleanupTests(unittest.TestCase):
         path.write_text(content, encoding='utf-8')
         return path
 
+    def test_method_cleanup_removes_grouped_geometry_job_using_that_method(self):
+        self.queue.enqueue([dict(action='evaluate', class_name='Dewa', model_id='model_01',
+            evaluation_method='3DGS, RaDe-GS', evaluation_methods=['3DGS', 'RaDe-GS'])])
+        delete_model_data(self.queue, {**self.data, 'scope': 'radegs'})
+        self.assertEqual(self.queue.jobs, [])
+
     def test_complete_cleanup_preserves_other_models_and_survives_restart(self):
         prefixes = ['datasets', 'outputs/3dgs', 'outputs/sugar', 'outputs/2dgs', 'outputs/radegs',
                     'outputs/ablations/scaffold_anchor/scaffold',

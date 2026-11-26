@@ -148,6 +148,11 @@ def build_command(job, root=PROJECT_ROOT):
     scene_pairs(cls, mdl)
     scene = root / "datasets" / cls / mdl
     common = ["--statue_class", cls, "--model_id", mdl]
+    if action == 'evaluate' and job.get('evaluation_methods'):
+        payload = {key: job[key] for key in ('action', 'class_name', 'model_id',
+            'evaluation_methods', 'experiment', 'geometry_options', 'scale_factor', 'apply_icp') if key in job}
+        return [sys.executable, '-u', str(root / 'pipeline_tools/evaluate_geometry_model.py'),
+                '--job_json', json.dumps(payload)]
     gpu = ["--gpu", str(job.get("gpu", 0))]
     settings = resolution_settings(job)
     image_args = ['--image_downscale', str(settings['image_downscale']),
@@ -445,6 +450,21 @@ def prepare_jobs(data, root=PROJECT_ROOT):
                              geometry_options=options,
                              sugar_configuration_source=source_preset,
                              upstream_reference=references['source'], **settings))
+    group_geometry = data.get('group_geometry', False)
+    if not isinstance(group_geometry, bool):
+        raise ValueError('Pilihan kelompok evaluasi geometri harus boolean.')
+    if action == 'evaluate' and group_geometry:
+        grouped = {}
+        for job in jobs:
+            key = (job['class_name'], job['model_id'], job['experiment'])
+            if key not in grouped:
+                grouped[key] = dict(job, evaluation_methods=[])
+            grouped[key]['evaluation_methods'].append(job['evaluation_method'])
+        for job in grouped.values():
+            job['evaluation_methods'] = [method for method in ('3DGS', 'SuGaR', '2DGS', 'RaDe-GS')
+                                         if method in job['evaluation_methods']]
+            job['evaluation_method'] = ', '.join(job['evaluation_methods'])
+        jobs = list(grouped.values())
     return jobs, skipped
 
 

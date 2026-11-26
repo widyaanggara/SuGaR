@@ -561,11 +561,12 @@ test('bulk geometry persists each LiDAR unit and auto alignment without asking f
   await app.events.DOMContentLoaded();
   vm.runInContext("openQueueDialog('', '', 'evaluate')", app.context);
   assert.equal(app.nodes.get('geometryCalibrationBody').children.length, 18);
-  assert.match(app.nodes.get('queuePlanSummary').textContent, /4 pekerjaan/);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /4 evaluasi metode/);
   assert.equal(vm.runInContext("geometryInputs.get('Dewa/model_01').unit.value", app.context), 'm');
   assert.equal(vm.runInContext("geometryInputs.get('Dewa/model_02').unit.value", app.context), 'mm');
   assert.equal(vm.runInContext("geometryInputs.get('Dewi/model_01').unit.value", app.context), '');
   assert.equal(app.nodes.get('geometryScaleHeading').hidden, true);
+  assert.match(app.nodes.get('queueDialogSubmit').textContent, /2 pekerjaan/);
   app.nodes.get('queueApplyIcp').checked = false;
   await vm.runInContext('submitQueueDialog()', app.context);
   const calibration = app.calls.find(([url]) => url === '/api/geometry-settings');
@@ -578,6 +579,7 @@ test('bulk geometry persists each LiDAR unit and auto alignment without asking f
   assert.equal(enqueue[1].evaluation_method, 'both');
   assert.equal(enqueue[1].apply_icp, true);
   assert.equal(enqueue[1].geometry_settings_required, true);
+  assert.equal(enqueue[1].group_geometry, true);
   assert.equal(Object.hasOwn(enqueue[1], 'scale_factor'), false);
 });
 
@@ -963,7 +965,7 @@ test('geometry checkboxes support all methods, subsets, and empty selection', as
   vm.runInContext("openQueueDialog('Dewa', 'model_01', 'evaluate'); selectAllGeometryMethods()", app.context);
   assert.equal(app.nodes.get('queueVisualMethod').hidden, true);
   assert.equal(app.nodes.get('queueGeometryMethods').hidden, false);
-  assert.match(app.nodes.get('queuePlanSummary').textContent, /4 pekerjaan/);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /4 evaluasi metode/);
   for (const method of ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']) app.nodes.get('queueGeometry-' + method).checked = false;
   vm.runInContext('updateQueuePlan()', app.context);
   assert.equal(app.nodes.get('queueDialogSubmit').disabled, true);
@@ -971,7 +973,7 @@ test('geometry checkboxes support all methods, subsets, and empty selection', as
   app.nodes.get('queueGeometry-2DGS').checked = true;
   app.nodes.get('queueGeometry-RaDe-GS').checked = true;
   vm.runInContext('updateQueuePlan()', app.context);
-  assert.match(app.nodes.get('queuePlanSummary').textContent, /2 pekerjaan/);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /1 pekerjaan/);
   await vm.runInContext('submitQueueDialog()', app.context);
   assert.deepEqual(app.calls.find(([url]) => url === '/api/run')[1].evaluation_methods, ['2DGS', 'RaDe-GS']);
 });
@@ -995,7 +997,19 @@ test('geometry shows all four source badges and routes Scaffold selection indepe
   assert.match(badges, /2DGS ada/);
   assert.match(badges, /RaDe-GS ada/);
   assert.match(badges, /3DGS belum ada/);
-  assert.match(app.nodes.get('queuePlanSummary').textContent, /2 pekerjaan/);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /1 pekerjaan/);
   await vm.runInContext('submitQueueDialog()', app.context);
   assert.equal(app.calls.find(([url]) => url === '/api/run')[1].experiment, 'scaffold_anchor');
+});
+
+test('grouped geometry queue row lists chosen methods below the job name', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  app.setQueue({jobs: [{id: 'geometry-group', class_name: 'Dewa', model_id: 'model_01',
+    action: 'evaluate', status: 'QUEUED', evaluation_methods: ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'],
+    evaluation_method: '3DGS, SuGaR, 2DGS, RaDe-GS'}]});
+  await vm.runInContext('pollLogs()', app.context);
+  const row = app.nodes.get('queueBody').children[0];
+  assert.match(row.innerHTML, /Metode: 3DGS, SuGaR, 2DGS, RaDe-GS/);
+  assert.equal(row.lastElementChild.children[0].textContent, 'Log');
 });

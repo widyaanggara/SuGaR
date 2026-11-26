@@ -56,7 +56,8 @@ def delete_model_data(queue, data):
                 return job['action'] in ('3dgs', 'sugar', '2dgs', 'radegs', 'full_pipeline', 'evaluate', 'evaluate_visual')
             return (whole or job['action'] == scope
                     or (job['action'] in ('evaluate', 'evaluate_visual')
-                        and job.get('evaluation_method') == labels[scope])
+                        and (job.get('evaluation_method') == labels[scope]
+                             or labels[scope] in job.get('evaluation_methods', [])))
                     or (scope == 'sugar' and job['action'] in ('evaluate', 'evaluate_visual')
                         and job.get('evaluation_method') == 'both')
                     or (job['status'] == 'QUEUED' and job['action'] == 'full_pipeline'))

@@ -711,6 +711,8 @@ function queuePlan() {
 function updateQueuePlan() {
   if (!queueSelection) return;
   const {ready, skipped} = queuePlan();
+  const jobCount = selectedQueueAction === 'evaluate'
+    ? new Set(ready.map(item => `${item.cls}/${item.mdl}`)).size : ready.length;
   const busy = queueSubmitting || calibrationSaving;
   const manual = $('queueAlignment').value === 'manual';
   const selectedInputs = selectedModelPairs().map(({cls, mdl}) => geometryInputs.get(`${cls}/${mdl}`));
@@ -718,14 +720,14 @@ function updateQueuePlan() {
     const text = inputs.scale.value.trim();
     return text && (!Number.isFinite(Number(text)) || Number(text) <= 0);
   });
-  $('queuePlanSummary').textContent = isFilePreview ? 'Pratinjau lokal — tidak mengirim pekerjaan' : invalidScale ? 'Perbaiki skala manual yang tidak valid' : `${ready.length} pekerjaan siap diantrekan`;
+  $('queuePlanSummary').textContent = isFilePreview ? 'Pratinjau lokal — tidak mengirim pekerjaan' : invalidScale ? 'Perbaiki skala manual yang tidak valid' : `${jobCount} pekerjaan siap diantrekan` + (selectedQueueAction === 'evaluate' ? ` (${ready.length} evaluasi metode; satu log per togog)` : '');
   $('queuePlanNote').textContent = skipped.length ? `${skipped.length} target belum siap dan akan dilewati.` : 'Semua target siap.';
   if (selectedQueueAction === 'evaluate' && !selectedGeometryMethods().length) $('queuePlanNote').textContent = 'Pilih setidaknya satu metode.';
   $('queueSkippedDetails').hidden = !skipped.length;
   $('queueSkippedSummary').textContent = `${skipped.length} target yang belum siap`;
   $('queueSkippedList').innerHTML = skipped.map(reason => `<li>${esc(reason)}</li>`).join('');
   $('queueDialogSubmit').disabled = isFilePreview || busy || invalidScale || !ready.length;
-  $('queueDialogSubmit').textContent = queueSubmitting ? 'Menambahkan...' : `Antrekan ${ready.length} pekerjaan`;
+  $('queueDialogSubmit').textContent = queueSubmitting ? 'Menambahkan...' : `Antrekan ${jobCount} pekerjaan`;
   $('queueDialogCancel').disabled = busy;
   $('queueDialogClose').disabled = busy;
   $('queueSaveCalibration').disabled = isFilePreview || busy || invalidScale || !selectedInputs.some(inputs => inputs.unit.value && (!manual || Number(inputs.scale.value) > 0));
@@ -810,6 +812,7 @@ async function submitQueueDialog() {
     scaffold_resolution: Number($('queueScaffoldResolution').value),
     evaluation_method: ['evaluate_visual', 'evaluate'].includes(action) ? $('queueMethod').value : 'SuGaR',
     geometry_settings_required: action === 'evaluate',
+    group_geometry: action === 'evaluate',
     ...(action === 'evaluate' ? {evaluation_methods: selectedGeometryMethods()} : {}),
     apply_icp: $('queueAlignment').value === 'automatic' || $('queueApplyIcp').checked};
   queueSubmitting = true;
@@ -891,7 +894,7 @@ async function pollLogs() {
         const failed = ['FAILED', 'INTERRUPTED', 'CANCELLED'].includes(job.status);
         const statusClass = job.status === 'COMPLETED' ? 'chip-done' : failed ? 'chip-error' :
           ['RUNNING', 'STOPPING'].includes(job.status) ? 'chip-partial' : 'chip-pending';
-        row.innerHTML = `<td>${modelIdentityHtml(job.class_name, job.model_id)}</td><td>${esc(actionLabel(job.action))}${job.action.includes('evaluate') ? ' · ' + esc(job.evaluation_method) : ''}${job.experiment === 'scaffold_anchor' ? '<small class="model-reference">Ablasi anchor Scaffold-GS</small>' : ''}${job.pipeline_start === 'existing_colmap' ? '<small class="model-reference">Mulai dari hasil COLMAP</small>' : ''}${job.recovery ? '<small class="model-reference">Prioritas pemulihan checkpoint</small>' : ''}</td>
+        row.innerHTML = `<td>${modelIdentityHtml(job.class_name, job.model_id)}</td><td>${esc(actionLabel(job.action))}${job.evaluation_methods ? '<small class="model-reference">Metode: ' + esc(job.evaluation_methods.join(', ')) + '</small>' : job.action.includes('evaluate') ? ' · ' + esc(job.evaluation_method) : ''}${job.experiment === 'scaffold_anchor' ? '<small class="model-reference">Ablasi anchor Scaffold-GS</small>' : ''}${job.pipeline_start === 'existing_colmap' ? '<small class="model-reference">Mulai dari hasil COLMAP</small>' : ''}${job.recovery ? '<small class="model-reference">Prioritas pemulihan checkpoint</small>' : ''}</td>
           <td><span class="chip ${statusClass}">${esc(job.status)}</span></td>
           <td id="job-duration-${esc(job.id)}">${job.started_at ? fmtSec((job.finished_at || Date.now() / 1000) - job.started_at) : '-'}</td><td></td>`;
         const logButton = document.createElement('button');

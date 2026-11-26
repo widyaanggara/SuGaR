@@ -2,6 +2,16 @@
 
 ## Dashboard
 
+Antrean geometri dari popup dikelompokkan **satu pekerjaan per togog dan
+eksperimen**. Metode yang siap dijalankan berurutan dalam satu log dengan
+penanda `[1/N]` dan ringkasan status per metode di akhir. Kegagalan satu metode
+tidak menghentikan metode berikutnya; pekerjaan keseluruhan berstatus FAILED
+jika ada metode gagal, sementara skor metode yang berhasil tetap tersimpan.
+Antrekan ulang pekerjaan kelompok akan mengevaluasi ulang metode dalam kelompok
+tersebut, tanpa training ulang. Antrean lama per metode tetap didukung; buat
+pekerjaan baru dari popup untuk memakai pengelompokan. API mengaktifkannya
+dengan `group_geometry: true`.
+
 Evaluasi geometri menyediakan pilihan **Hasil yang dievaluasi: Baseline / Ablasi
 Scaffold**, lalu checkbox 3DGS, SuGaR, 2DGS, dan RaDe-GS. Tombol **Pilih semua
 metode** memilih keempatnya. Status sumber di baris LiDAR mengikuti eksperimen

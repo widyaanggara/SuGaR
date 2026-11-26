@@ -15,6 +15,9 @@ from pipeline_tools.batch_run_all import process_single_statue
 
 class ExternalMethodTests(unittest.TestCase):
     def setUp(self):
+        preflight = patch('pipeline_tools.batch_run_all.require_training_environment')
+        self.preflight = preflight.start()
+        self.addCleanup(preflight.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -28,6 +31,17 @@ class ExternalMethodTests(unittest.TestCase):
     def write(self, path, value='data'):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(value, encoding='utf-8')
+
+    def test_missing_external_dependency_stops_before_scaffold_or_training(self):
+        self.preflight.side_effect = RuntimeError('diff_surfel_rasterization missing')
+        with patch('pipeline_tools.batch_run_all.run_stage') as stage, \
+                patch('pipeline_tools.scaffold_init.prepare') as scaffold:
+            with self.assertRaisesRegex(RuntimeError, 'diff_surfel_rasterization'):
+                process_single_statue(self.root / 'datasets/Penabuh/model_01',
+                    'Penabuh', 'model_01', root=self.root, include_external=True,
+                    experiment='scaffold_anchor', scaffold_repo=str(self.root / 'scaffold'))
+        stage.assert_not_called()
+        scaffold.assert_not_called()
 
     def test_bulk_queue_routes_methods_and_skips_unprepared_slots(self):
         for method in ('2dgs', 'radegs'):

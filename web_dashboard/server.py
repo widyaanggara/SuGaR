@@ -313,6 +313,13 @@ def prepare_jobs(data, root=PROJECT_ROOT):
     if not isinstance(method, str) or method not in allowed_methods:
         raise ValueError("Metode evaluasi harus 3DGS, SuGaR, atau keduanya untuk evaluasi.")
     methods = ('3DGS', 'SuGaR') if method == 'both' else (method,)
+    if action == 'evaluate' and 'evaluation_methods' in data:
+        selected = data['evaluation_methods']
+        if (not isinstance(selected, list) or not selected
+                or any(not isinstance(item, str) or item not in {'3DGS', 'SuGaR', '2DGS', 'RaDe-GS'}
+                       for item in selected)):
+            raise ValueError('Pilih setidaknya satu metode geometri yang valid.')
+        methods = tuple(dict.fromkeys(selected))
     external_python = data.get('external_python') or sys.executable
     external_resolution = data.get('external_resolution', -1)
     radegs_profile = data.get('radegs_profile', 'yaml')

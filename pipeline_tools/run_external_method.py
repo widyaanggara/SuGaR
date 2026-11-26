@@ -19,6 +19,7 @@ from pipeline_tools.gpu_lock import gpu_lock
 from pipeline_tools.logger_utils import ThesisLogger
 from pipeline_tools.visual_protocol import specification
 from pipeline_tools.run_settings import add_resolution_arguments, resolution_settings
+from pipeline_tools.check_method_environments import require_training_environment
 
 
 def commands(method, python, scene, output, resolution=-1):
@@ -140,6 +141,8 @@ def run(args):
         raise ValueError('Jalankan COLMAP terlebih dahulu: images/ dan sparse/0 harus lengkap.')
     if not (repo / 'train.py').is_file():
         raise ValueError(f'Repository belum tersedia: {repo}')
+    if not args.evaluate_only and not mesh_only:
+        require_training_environment(args.method, args.python, repo, args.gpu, shared=shared)
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(args.gpu), PYTHONUNBUFFERED='1', PYTHONFAULTHANDLER='1')
     print(f'[CONFIG] Metode={args.method}; repository={repo}; python={args.python}; '
           f'resolusi={args.resolution} '

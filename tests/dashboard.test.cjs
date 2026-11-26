@@ -953,3 +953,25 @@ test('bulk 3DGS and SuGaR are offered for all models and only ready models are c
   assert.equal(request.class_name, '');
   assert.equal(request.model_id, '');
 });
+
+test('geometry checkboxes support all methods, subsets, and empty selection', async () => {
+  const app = page();
+  app.setModel('Dewa', 'model_01', {has_gt_lidar: true,
+    geometry_sources: {'3DGS': true, SuGaR: true, '2DGS': true, 'RaDe-GS': true},
+    geometry_settings: {lidar_unit: 'm', alignment_mode: 'automatic'}});
+  await app.events.DOMContentLoaded();
+  vm.runInContext("openQueueDialog('Dewa', 'model_01', 'evaluate'); selectAllGeometryMethods()", app.context);
+  assert.equal(app.nodes.get('queueVisualMethod').hidden, true);
+  assert.equal(app.nodes.get('queueGeometryMethods').hidden, false);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /4 pekerjaan/);
+  for (const method of ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']) app.nodes.get('queueGeometry-' + method).checked = false;
+  vm.runInContext('updateQueuePlan()', app.context);
+  assert.equal(app.nodes.get('queueDialogSubmit').disabled, true);
+  assert.match(app.nodes.get('queuePlanNote').textContent, /Pilih setidaknya/);
+  app.nodes.get('queueGeometry-2DGS').checked = true;
+  app.nodes.get('queueGeometry-RaDe-GS').checked = true;
+  vm.runInContext('updateQueuePlan()', app.context);
+  assert.match(app.nodes.get('queuePlanSummary').textContent, /2 pekerjaan/);
+  await vm.runInContext('submitQueueDialog()', app.context);
+  assert.deepEqual(app.calls.find(([url]) => url === '/api/run')[1].evaluation_methods, ['2DGS', 'RaDe-GS']);
+});

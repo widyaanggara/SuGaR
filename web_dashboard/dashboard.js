@@ -550,6 +550,10 @@ function openQueueDialog(cls = '', mdl = '', action = 'full_pipeline') {
   $('queueClass').value = cls;
   populateQueueModels(mdl);
   $('queueMethod').value = $('evaluationMethod').value || 'both';
+  for (const method of ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']) {
+    $('queueGeometry-' + method).checked = $('queueMethod').value === 'both'
+      ? ['3DGS', 'SuGaR'].includes(method) : $('queueMethod').value === method;
+  }
   $('queuePipelineStart').value = 'auto';
   $('queueMethods').value = 'all';
   $('queueApplyIcp').checked = true;
@@ -639,6 +643,8 @@ function chooseQueueAction(action) {
   $('queue-action-extract_frames').hidden = !single || !selectedModelPairs()[0]?.info.has_video;
   const evaluation = ['evaluate_visual', 'evaluate'].includes(action);
   $('queueMethodOptions').hidden = !evaluation;
+  $('queueVisualMethod').hidden = action === 'evaluate';
+  $('queueGeometryMethods').hidden = action !== 'evaluate';
   $('queueGeometryOptions').hidden = action !== 'evaluate';
   $('queuePipelineOptions').hidden = action !== 'full_pipeline';
   $('queueActionHelp').textContent = {
@@ -656,10 +662,19 @@ function chooseQueueAction(action) {
   updateQueuePlan();
 }
 
+function selectedGeometryMethods() {
+  return ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS'].filter(method => $('queueGeometry-' + method).checked);
+}
+
+function selectAllGeometryMethods() {
+  for (const method of ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']) $('queueGeometry-' + method).checked = true;
+  updateQueuePlan();
+}
+
 function queuePlan() {
   const action = selectedQueueAction;
   const evaluation = ['evaluate_visual', 'evaluate'].includes(action);
-  const methods = evaluation ? ($('queueMethod').value === 'both' ? ['3DGS', 'SuGaR'] : [$('queueMethod').value]) : [''];
+  const methods = action === 'evaluate' ? selectedGeometryMethods() : evaluation ? ($('queueMethod').value === 'both' ? ['3DGS', 'SuGaR'] : [$('queueMethod').value]) : [''];
   const ready = [], skipped = [];
   for (const {cls, mdl, info} of selectedModelPairs()) {
     for (const method of methods) {
@@ -699,6 +714,7 @@ function updateQueuePlan() {
   });
   $('queuePlanSummary').textContent = isFilePreview ? 'Pratinjau lokal — tidak mengirim pekerjaan' : invalidScale ? 'Perbaiki skala manual yang tidak valid' : `${ready.length} pekerjaan siap diantrekan`;
   $('queuePlanNote').textContent = skipped.length ? `${skipped.length} target belum siap dan akan dilewati.` : 'Semua target siap.';
+  if (selectedQueueAction === 'evaluate' && !selectedGeometryMethods().length) $('queuePlanNote').textContent = 'Pilih setidaknya satu metode.';
   $('queueSkippedDetails').hidden = !skipped.length;
   $('queueSkippedSummary').textContent = `${skipped.length} target yang belum siap`;
   $('queueSkippedList').innerHTML = skipped.map(reason => `<li>${esc(reason)}</li>`).join('');
@@ -708,6 +724,8 @@ function updateQueuePlan() {
   $('queueDialogClose').disabled = busy;
   $('queueSaveCalibration').disabled = isFilePreview || busy || invalidScale || !selectedInputs.some(inputs => inputs.unit.value && (!manual || Number(inputs.scale.value) > 0));
   $('queueMethod').disabled = busy;
+  for (const method of ['3DGS', 'SuGaR', '2DGS', 'RaDe-GS']) $('queueGeometry-' + method).disabled = busy;
+  $('queueGeometrySelectAll').disabled = busy;
   $('queuePipelineStart').disabled = busy;
   $('queueExternalOptions').hidden = !(['2dgs', 'radegs'].includes(selectedQueueAction) || (selectedQueueAction === 'evaluate_visual' && ['2DGS', 'RaDe-GS'].includes($('queueMethod').value)));
   const scaffoldSelected = $('queueExperiment').value === 'scaffold_anchor';
@@ -785,6 +803,7 @@ async function submitQueueDialog() {
     scaffold_resolution: Number($('queueScaffoldResolution').value),
     evaluation_method: ['evaluate_visual', 'evaluate'].includes(action) ? $('queueMethod').value : 'SuGaR',
     geometry_settings_required: action === 'evaluate',
+    ...(action === 'evaluate' ? {evaluation_methods: selectedGeometryMethods()} : {}),
     apply_icp: $('queueAlignment').value === 'automatic' || $('queueApplyIcp').checked};
   queueSubmitting = true;
   updateQueuePlan();

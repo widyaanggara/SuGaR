@@ -8,6 +8,31 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def require_training_environment(method, python, repo, gpu=0, shared=True):
+    """Import the real training entry point before any expensive batch stages."""
+    repo = Path(repo).resolve()
+    if not (repo / 'train.py').is_file():
+        raise RuntimeError(f'Repository {method} belum lengkap: {repo}')
+    entry = ([str(ROOT / 'pipeline_tools/external_visual_launcher.py'),
+              '--repo', str(repo), 'train.py'] if shared else ['train.py'])
+    command = [python, *entry, '--help']
+    print(f'[PREFLIGHT] {method}: {python}', flush=True)
+    try:
+        subprocess.run(command, cwd=repo,
+                       env=dict(os.environ, CUDA_VISIBLE_DEVICES=str(gpu), PYTHONUNBUFFERED='1'),
+                       check=True, capture_output=True, text=True,
+                       encoding='utf-8', errors='replace', timeout=90)
+    except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)) if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        raise RuntimeError(
+            f'Environment {method} belum siap. Python: {python}.\n{detail}\n'
+            f'Periksa Python {method} di dashboard dan pasang dependency pada interpreter tersebut. '
+            'Untuk 2DGS, diff_surfel_rasterization harus dibangun dari '
+            'external/2DGS/submodules/diff-surfel-rasterization. '
+            'Lihat docs/TOGOGLAB_2DGS_RADEGS.md. Checkpoint yang ada tidak dihapus.'
+        ) from exc
+
+
 def method_entrypoints(repo, scripts):
     entries = [(script, [script]) for script in scripts]
     # Validate the actual shared-protocol launcher too: native --help alone

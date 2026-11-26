@@ -14,6 +14,7 @@ from pipeline_tools.run_settings import (add_resolution_arguments, resolution_se
     training_matches, evaluation_matches, colmap_settings,
     add_colmap_arguments, colmap_arguments, sugar_settings, sugar_arguments)
 from pipeline_tools.object_region import resolve_region
+from pipeline_tools.check_method_environments import require_training_environment
 
 
 def run_stage(script, arguments, root=PROJECT_ROOT):
@@ -96,6 +97,12 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
     if not has_data(scene_dir):
         print(f"[SKIP] {statue_class}/{model_id}: belum ada foto/video.", flush=True)
         return "SKIPPED"
+    if include_external:
+        for method, python, repo_name in (('2dgs', python_2dgs, '2DGS'),
+                                          ('radegs', python_radegs, 'RaDe-GS')):
+            require_training_environment(method, python or sys.executable,
+                                         root / 'external' / repo_name, gpu,
+                                         shared=visual_protocol == 'shared')
     common = ["--statue_class", statue_class, "--model_id", model_id]
     out_3dgs = root / "outputs" / "3dgs" / statue_class / model_id
     out_sugar = root / "outputs" / "sugar" / statue_class / model_id

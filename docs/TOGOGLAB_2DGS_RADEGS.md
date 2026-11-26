@@ -33,6 +33,35 @@ dashboard tetap perlu dependensi evaluasi geometri TogogLab untuk evaluasi LiDAR
 
 ## Penggunaan dashboard
 
+### Jika 2DGS gagal: `No module named 'diff_surfel_rasterization'`
+
+Ini dependency rasterizer 2DGS pada Python yang dipilih, bukan kegagalan training
+Scaffold atau SuGaR. Pipeline sekarang memeriksa import training 2DGS/RaDe-GS
+sebelum memulai tahap mahal. Pemeriksaan import tidak menjamin training GPU sukses.
+
+Jika environment 2DGS yang lengkap sudah tersedia, isi **Python 2DGS** dengan
+path interpreter environment itu. Jangan mengasumsikan environment dashboard
+`sugar` memiliki dependency semua metode.
+
+Jika memang memakai environment `sugar` seperti log server Anggara, jalankan
+di server dari `/home/anggara/SuGaR` (perlu CUDA toolkit/nvcc dan compiler yang
+kompatibel dengan PyTorch environment tersebut):
+
+```bash
+/home/anggara/miniconda3/envs/sugar/bin/python -m pip install --no-build-isolation ./external/2DGS/submodules/diff-surfel-rasterization
+/home/anggara/miniconda3/envs/sugar/bin/python -c "import torch; import diff_surfel_rasterization; from diff_surfel_rasterization import _C; print('Rasterizer 2DGS OK')"
+/home/anggara/miniconda3/envs/sugar/bin/python pipeline_tools/external_visual_launcher.py --repo /home/anggara/SuGaR/external/2DGS train.py --help
+```
+
+Jika build gagal, periksa log compiler sebelum mengubah versi CUDA/PyTorch.
+Import rasterizer yang sukses belum menjamin dependency lain lengkap; probe
+launcher di atas menguji import jalur training yang dipakai job. Periksa juga
+environment RaDe-GS dengan `check_method_environments.py` sebelum retry pipeline.
+Antrekan ulang dengan pengaturan dan environment yang benar serta resume aktif;
+tahap lengkap hanya dilewati jika checkpoint dan konfigurasinya cocok.
+Job tersimpan membawa path Python lama: buat job pengganti dengan pilihan Python
+yang benar jika path interpreter perlu diubah. Jangan hapus checkpoint SuGaR/3DGS.
+
 1. Restart dashboard setelah memperbarui kode, lalu refresh browser.
 2. Siapkan `datasets/<kelas>/<model_id>/images/` dan `sparse/0/`. Jika belum ada,
    jalankan Rekonstruksi COLMAP dari kartu patung terlebih dahulu.

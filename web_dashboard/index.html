@@ -386,6 +386,9 @@
 .queue-action-help,.queue-help{font-size:12px;line-height:1.6;color:var(--text-3);margin:10px 0 0;max-width:75ch}
 .queue-help:empty{display:none}
 .queue-method-options{max-width:none}
+.geometry-method-checks{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.geometry-method-checks label{display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;cursor:pointer}
+.geometry-method-checks label:has(input:checked){border-color:var(--accent);background:var(--bg-2)}
 .queue-method-options>label{max-width:360px}
 .queue-pipeline-options:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .queue-pipeline-options>.queue-block-heading,.queue-pipeline-options>.queue-field-wide,.queue-pipeline-options>div,.queue-pipeline-options>details,.queue-pipeline-options>p{grid-column:1/-1;max-width:none;margin-bottom:0}
@@ -584,7 +587,18 @@
         </div></details>
         <p id="queuePipelineHelp" class="queue-help"></p>
       </section>
-      <section id="queueMethodOptions" class="queue-block queue-method-options" hidden><div class="queue-block-heading"><h3><span class="queue-step">3</span>Metode</h3></div><label for="queueMethod">Metode yang dievaluasi<select id="queueMethod" onchange="updateQueuePlan()"><option value="both">3DGS dan SuGaR</option><option value="3DGS">3DGS saja</option><option value="SuGaR">SuGaR saja</option><option value="2DGS">2DGS saja</option><option value="RaDe-GS">RaDe-GS saja</option></select></label></section>
+      <section id="queueMethodOptions" class="queue-block queue-method-options" hidden><div class="queue-block-heading"><h3><span class="queue-step">3</span>Metode</h3></div><label id="queueVisualMethod" for="queueMethod">Metode yang dievaluasi<select id="queueMethod" onchange="updateQueuePlan()"><option value="both">3DGS dan SuGaR</option><option value="3DGS">3DGS saja</option><option value="SuGaR">SuGaR saja</option><option value="2DGS">2DGS saja</option><option value="RaDe-GS">RaDe-GS saja</option></select></label>
+        <div id="queueGeometryMethods" hidden>
+          <p>Pilih satu atau beberapa metode yang dievaluasi.</p>
+          <div class="geometry-method-checks" role="group" aria-label="Metode evaluasi geometri">
+            <label><input id="queueGeometry-3DGS" type="checkbox" onchange="updateQueuePlan()">3DGS</label>
+            <label><input id="queueGeometry-SuGaR" type="checkbox" onchange="updateQueuePlan()">SuGaR</label>
+            <label><input id="queueGeometry-2DGS" type="checkbox" onchange="updateQueuePlan()">2DGS</label>
+            <label><input id="queueGeometry-RaDe-GS" type="checkbox" onchange="updateQueuePlan()">RaDe-GS</label>
+          </div>
+          <button id="queueGeometrySelectAll" type="button" class="btn btn-ghost btn-sm" onclick="selectAllGeometryMethods()">Pilih semua metode</button>
+        </div>
+      </section>
       <section id="queueExternalOptions" class="queue-block queue-method-options" hidden><div class="queue-block-heading"><h3><span class="queue-step">3</span>Environment</h3></div>
         <div class="queue-subgrid">
         <label>Python metode di server<input id="queueExternalPython" placeholder="/home/user/miniconda3/envs/surfel_splatting/bin/python"></label>

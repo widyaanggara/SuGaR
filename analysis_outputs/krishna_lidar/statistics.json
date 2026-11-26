@@ -1,0 +1,78 @@
+{
+  "source": "C:\\Users\\anggara\\Downloads\\dewa_krishna.ply",
+  "unit": "unknown; values below are file-coordinate units",
+  "vertices": 215707,
+  "nonfinite": 0,
+  "duplicate_xyz": 9621,
+  "header": [
+    "ply",
+    "format binary_little_endian 1.0",
+    "comment Derived LAS point cloud; see selection JSON for LAS metadata.",
+    "element vertex 215707",
+    "property double x",
+    "property double y",
+    "property double z",
+    "property ushort intensity",
+    "property uchar return_number",
+    "property uchar number_of_returns",
+    "property uchar scan_direction_flag",
+    "property uchar edge_of_flight_line",
+    "property uchar classification",
+    "property uchar synthetic",
+    "property uchar key_point",
+    "property uchar withheld",
+    "property char scan_angle_rank",
+    "property uchar user_data",
+    "property ushort point_source_id",
+    "property double gps_time",
+    "property ushort red",
+    "property ushort green",
+    "property ushort blue",
+    "end_header"
+  ],
+  "minimum_xyz": [
+    0.9470000000000001,
+    -0.47600000000000003,
+    -0.099
+  ],
+  "maximum_xyz": [
+    1.754,
+    0.252,
+    0.8160000000000001
+  ],
+  "extent_xyz": [
+    0.8069999999999999,
+    0.728,
+    0.915
+  ],
+  "nearest_neighbor_percentiles": {
+    "p5": 0.0009999999999998899,
+    "p25": 0.0010000000000000009,
+    "p50": 0.0014142135623730963,
+    "p75": 0.0020000000000000018,
+    "p95": 0.003316624790355357,
+    "p99": 0.006403124237432804,
+    "max": 0.22763567382991626
+  },
+  "mean_16_neighbor_distance_percentiles": [
+    0.003181950610600804,
+    0.006871520749797672,
+    0.013895210792384677,
+    0.25372260805492697
+  ],
+  "statistical_outlier_candidates_mean16_plus3std": 1792,
+  "rgb_range": {
+    "red": [
+      6425,
+      51400
+    ],
+    "green": [
+      5654,
+      50886
+    ],
+    "blue": [
+      4883,
+      51914
+    ]
+  }
+}

@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 
 from pipeline_tools.dataset_registry import file_signature
-from pipeline_tools.geometry_config import (geometry_result_current, read_geometry_scales,
+from pipeline_tools.geometry_config import (geometry_model_path, geometry_source_ready, geometry_result_current, read_geometry_scales,
     save_geometry_scales, read_geometry_settings, save_geometry_settings)
 from pipeline_tools.init_dataset_folders import initialize_workspace
 from web_dashboard.job_queue import JobQueue
@@ -36,6 +36,37 @@ def artifacts(root, mdl='model_01'):
 
 
 class GeometryJobTests(unittest.TestCase):
+    def test_3dgs_crop_preferred_for_geometry_and_separate_between_experiments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifacts(root)
+            crop = root / 'outputs/3dgs/Dewa/model_01/crop/3dgs-crop.ply'
+            self.assertEqual(geometry_model_path(root, 'Dewa', 'model_01', '3DGS').name, 'point_cloud.ply')
+            write(crop)
+            self.assertEqual(geometry_model_path(root, 'Dewa', 'model_01', '3DGS'), crop)
+            jobs, _ = prepare_jobs(dict(action='evaluate', class_name='Dewa', model_id='model_01',
+                evaluation_method='3DGS', geometry_options={'lidar_unit': 'm', 'alignment_mode': 'automatic'}), root)
+            command = build_command(jobs[0], root)
+            self.assertEqual(command[command.index('-p') + 1], str(crop))
+            ablation = geometry_model_path(root, 'Dewa', 'model_01', '3DGS', 'scaffold_anchor')
+            self.assertEqual(ablation.name, 'point_cloud.ply')
+            self.assertIn('ablations', ablation.parts)
+            crop.write_bytes(b'')
+            self.assertFalse(geometry_source_ready(root, 'Dewa', 'model_01', '3DGS'))
+
+    def test_crop_switch_invalidates_old_result_even_with_same_size_and_mtime(self):
+        import os
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifacts(root)
+            source = geometry_model_path(root, 'Dewa', 'model_01', '3DGS')
+            crop = source.parents[2] / 'crop/3dgs-crop.ply'
+            write(crop, source.read_text())
+            os.utime(crop, ns=(source.stat().st_atime_ns, source.stat().st_mtime_ns))
+            report = {'model_path': str(source), 'model_signature': file_signature(source)}
+            write(source.parents[2] / 'geometry/metrics.json', json.dumps(report))
+            self.assertFalse(geometry_result_current(root, 'Dewa', 'model_01', '3DGS', 1))
+
     def test_automatic_jobs_freeze_lidar_units_and_do_not_require_a_scale(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -2,6 +2,15 @@
 
 ## Dashboard
 
+Untuk evaluasi geometri 3DGS, simpan crop patung pada
+`outputs/3dgs/<kelas>/<model>/crop/3dgs-crop.ply`. Jika tersedia, evaluator
+memprioritaskan file tersebut dibanding point cloud Gaussian lengkap.
+Untuk Scaffold, gunakan struktur yang sama di bawah
+`outputs/ablations/scaffold_anchor/3dgs/`. Jika crop belum ada, evaluator tetap
+memakai `point_cloud/iteration_30000/point_cloud.ply`. Crop kosong tidak memicu
+fallback otomatis. Pergantian sumber crop/penuh membatalkan kecocokan hasil
+evaluasi lama; checkpoint training dan rendering tidak diganti.
+
 Antrean geometri dari popup dikelompokkan **satu pekerjaan per togog dan
 eksperimen**. Metode yang siap dijalankan berurutan dalam satu log dengan
 penanda `[1/N]` dan ringkasan status per metode di akhir. Kegagalan satu metode

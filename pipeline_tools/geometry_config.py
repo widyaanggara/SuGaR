@@ -170,6 +170,10 @@ def geometry_model_path(root, cls, mdl, method, experiment="baseline"):
         raise ValueError('Metode geometri harus 3DGS atau SuGaR.')
     output = base / method.lower() / cls / mdl
     if method == '3DGS':
+        cropped = output / 'crop/3dgs-crop.ply'
+        # An explicitly supplied crop must not silently fall back if empty/broken.
+        if cropped.exists():
+            return cropped
         return output / 'point_cloud/iteration_30000/point_cloud.ply'
     manifest = json.loads((output / 'pipeline_result.json').read_text(encoding='utf-8'))
     mesh = manifest.get('surface_mesh') or manifest['textured_mesh']
@@ -199,10 +203,16 @@ def geometry_result_current(root, cls, mdl, method, scale, options=None, experim
         from pipeline_tools.external_methods import output_base
         output = output_base(root, experiment) / method.replace('-', '').lower() / cls / mdl
         report = json.loads((output / 'geometry/metrics.json').read_text(encoding='utf-8'))
+        model = geometry_model_path(root, cls, mdl, method, experiment)
+        if method == '3DGS':
+            saved_crop = str(report.get('model_path', '')).replace('\\', '/').endswith('/crop/3dgs-crop.ply')
+            current_crop = model.name == '3dgs-crop.ply'
+            if saved_crop != current_crop:
+                return False
         gt = Path(root) / 'datasets' / cls / mdl / 'ground_truth/lidar.ply'
         metrics = ('chamfer_distance_cm',) + tuple(f'{name}_at_{threshold}cm_pct'
             for threshold in (2, 5) for name in ('precision', 'recall', 'f1'))
-        return (report['model_signature'] == file_signature(geometry_model_path(root, cls, mdl, method, experiment))
+        return (report['model_signature'] == file_signature(model)
                 and report['gt_signature'] == file_signature(gt)
                 and (report.get('geometry_options') == options if options is not None else
                      report['scale_factor_to_meters'] == scale)

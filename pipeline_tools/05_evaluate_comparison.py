@@ -65,11 +65,12 @@ def compute_chamfer_distance(source_pcd_path: str,
                              apply_icp: bool = True,
                              save_aligned_path: str = None,
                              auto_align: bool = False,
-                             lidar_unit: str = 'm'):
+                             lidar_unit: str = 'm', log=None):
     """
     Menghitung Chamfer Distance dan akurasi/kelengkapan geometri (cm)
     terhadap Ground Truth LiDAR dengan penyelarasan ICP otomatis.
     """
+    log = log or (lambda message: None)
     if not O3D_AVAILABLE:
         raise ImportError("Pustaka Open3D belum terinstall. Jalankan: pip install open3d")
     if (not auto_align and (scale_factor is None or not math.isfinite(scale_factor) or scale_factor <= 0)) or max_samples < 1:
@@ -82,9 +83,13 @@ def compute_chamfer_distance(source_pcd_path: str,
     # Fixed sampling seed makes repeated runs comparable. Meshes are sampled on
     # triangle surfaces, rather than comparing only their vertices.
     o3d.utility.random.seed(0)
+    log(f'[INPUT 1/2] Membaca rekonstruksi: {source_pcd_path}')
     mesh = o3d.io.read_triangle_mesh(str(source_pcd_path))
+    log('[INPUT] Representasi: ' + ('mesh; sampling merata pada permukaan.' if mesh.has_triangles()
+        else 'point cloud; memakai koordinat titik (untuk 3DGS: pusat Gaussian).'))
     src = (mesh.sample_points_uniformly(number_of_points=max_samples) if mesh.has_triangles()
            else o3d.io.read_point_cloud(str(source_pcd_path)))
+    log(f'[INPUT 2/2] Membaca ground truth LiDAR: {target_pcd_path}')
     tgt = o3d.io.read_point_cloud(str(target_pcd_path))
 
     if len(src.points) == 0:
@@ -99,18 +104,27 @@ def compute_chamfer_distance(source_pcd_path: str,
             tgt = mesh_tgt.sample_points_uniformly(number_of_points=max_samples)
 
     if len(src.points) == 0 or len(tgt.points) == 0:
-        raise ValueError("Point cloud sumber atau target kosong!")
+        raise ValueError(f'Data kosong atau gagal dibaca: rekonstruksi={len(src.points)} titik; '
+                         f'LiDAR={len(tgt.points)} titik. Periksa file dan format input di atas.')
 
     if not np.isfinite(np.asarray(src.points)).all() or not np.isfinite(np.asarray(tgt.points)).all():
         raise ValueError('Koordinat mengandung NaN atau infinity.')
     # Convert GT around the origin, preserving absolute coordinates consistently.
     tgt.scale(LIDAR_UNITS[lidar_unit], center=(0, 0, 0))
+    log(f'[INPUT] Titik sebelum pembatasan sampel: rekonstruksi={len(src.points):,}, LiDAR={len(tgt.points):,}.')
+    for label, cloud in [('rekonstruksi (satuan asli)', src), ('LiDAR (meter)', tgt)]:
+        extent = np.ptp(np.asarray(cloud.points), axis=0)
+        log(f'[UKURAN] Rentang XYZ {label}: ' + ' x '.join(f'{v:.6g}' for v in extent)
+            + '; bounding box termasuk noise, bukan ukuran fisik patung.')
+    log(f'[SATUAN] LiDAR={lidar_unit}; pengali ke meter={LIDAR_UNITS[lidar_unit]:g}. '
+        'Satuan berasal dari pilihan pengguna, tidak dideteksi dari PLY.')
     # Fixed bounded samples for registration AND metrics; keep full object coverage.
     sampling = np.random.default_rng(0)
     if len(src.points) > max_samples:
         src = src.select_by_index(sampling.choice(len(src.points), max_samples, replace=False).tolist())
     if len(tgt.points) > max_samples:
         tgt = tgt.select_by_index(sampling.choice(len(tgt.points), max_samples, replace=False).tolist())
+    log(f'[SAMPLING] Evaluasi: rekonstruksi={len(src.points):,}, LiDAR={len(tgt.points):,}; seed=0.')
 
     # 1. Terapkan faktor skala jika diberikan
     scale_transform = np.eye(4)
@@ -124,18 +138,42 @@ def compute_chamfer_distance(source_pcd_path: str,
     icp_rmse_cm = None
     alignment_details = {}
     if auto_align:
-        from pipeline_tools.geometry_alignment import automatic_similarity_alignment
-        transformation, alignment_details = automatic_similarity_alignment(
-            np.asarray(src.points), np.asarray(tgt.points))
+        from pipeline_tools.geometry_alignment import automatic_similarity_alignment, AlignmentRejected
+        try:
+            transformation, alignment_details = automatic_similarity_alignment(
+                np.asarray(src.points), np.asarray(tgt.points), log=log)
+        except AlignmentRejected as error:
+            log(f'[ALIGN DITOLAK] {error}')
+            if save_aligned_path:
+                import tempfile
+                parent = Path(save_aligned_path).parent / 'alignment_failures'
+                parent.mkdir(parents=True, exist_ok=True)
+                folder = Path(tempfile.mkdtemp(prefix='attempt_', dir=parent))
+                diagnostics = dict(error.diagnostics,
+                    source_path=str(source_pcd_path), lidar_path=str(target_pcd_path),
+                    lidar_unit=lidar_unit, sampling_seed=0,
+                    source_evaluation_points=len(src.points), target_evaluation_points=len(tgt.points))
+                src.transform(np.asarray(diagnostics['alignment_transform']))
+                for name, cloud in [('rejected_candidate.ply', src), ('ground_truth_meters.ply', tgt)]:
+                    if not o3d.io.write_point_cloud(str(folder / name), cloud):
+                        raise OSError(f'Gagal menyimpan diagnostik: {folder / name}') from error
+                (folder / 'diagnostics.json').write_text(json.dumps(diagnostics, indent=2), encoding='utf-8')
+                log(f'[DIAGNOSTIK] Folder percobaan gagal: {folder.resolve()}')
+                log('[DIAGNOSTIK] Buka rejected_candidate.ply dan ground_truth_meters.ply bersama '
+                    'di CloudCompare. diagnostics.json berisi angka dan transformasi kandidat; bukan skor evaluasi.')
+                raise AlignmentRejected(f'{error} Diagnostik kandidat yang ditolak: {folder}', diagnostics) from error
+            raise
         src.transform(transformation)
         scale_factor = alignment_details['scale_factor_to_meters']
     elif apply_icp:
+        log(f'[ALIGN MANUAL] Faktor skala={scale_factor:g}; memperbaiki posisi/rotasi dengan ICP.')
         src, transformation, rmse = align_point_clouds_icp(src, tgt, max_correspondence_distance=0.08)
         transformation = transformation @ scale_transform
         icp_rmse_cm = round(float(rmse * 100.0), 4)
 
     # 3. Simpan model yang sudah selaras (untuk visualisasi bab 4 skripsi)
     if save_aligned_path:
+        log(f'[SIMPAN] Menulis overlay hasil alignment: {save_aligned_path}')
         Path(save_aligned_path).parent.mkdir(parents=True, exist_ok=True)
         if not o3d.io.write_point_cloud(str(save_aligned_path), src):
             raise OSError('Gagal menyimpan rekonstruksi yang telah diselaraskan.')
@@ -143,6 +181,8 @@ def compute_chamfer_distance(source_pcd_path: str,
             raise OSError('Gagal menyimpan LiDAR acuan dalam meter.')
 
     # Jarak src -> tgt (Accuracy)
+    log('[METRIK] Alignment diterima; menghitung jarak tetangga terdekat dua arah...'
+        if auto_align else '[METRIK] Menghitung jarak tetangga terdekat dua arah; periksa overlay alignment manual.')
     dists_src_to_tgt = np.asarray(src.compute_point_cloud_distance(tgt))
     # Jarak tgt -> src (Completeness)
     dists_tgt_to_src = np.asarray(tgt.compute_point_cloud_distance(src))
@@ -184,6 +224,9 @@ def main():
     method_label = args.method + ("_scaffold_anchor" if args.experiment == "scaffold_anchor" else "")
     logger = ThesisLogger(statue_class=args.statue_class, model_id=args.model_id, method=method_label)
     logger.log(f"Memulai evaluasi metrik untuk {args.method} - {args.statue_class}/{args.model_id}")
+    logger.log(f'[KONFIGURASI] Eksperimen={args.experiment}; metode={args.method}; Python={sys.executable}')
+    logger.log(f'[KONFIGURASI] Alignment={"otomatis Sim(3)" if args.auto_align else "manual"}; '
+               f'LiDAR={args.lidar_unit}; ambang metrik=2 cm dan 5 cm.')
 
     model_path = Path(args.model_path)
     if not model_path.is_file():
@@ -234,7 +277,7 @@ def main():
                 apply_icp=not args.no_icp,
                 auto_align=args.auto_align,
                 lidar_unit=args.lidar_unit,
-                save_aligned_path=str(aligned_out)
+                save_aligned_path=str(aligned_out), log=logger.log
             )
             chamfer_cm = geo_metrics["chamfer_distance_cm"]
             logger.log(f"Satuan LiDAR: {args.lidar_unit}; dikonversi ke meter sebelum evaluasi.")
@@ -266,7 +309,21 @@ def main():
             temporary.write_text(json.dumps(report, indent=2), encoding='utf-8')
             temporary.replace(geometry_dir / 'metrics.json')
         except Exception as e:
-            logger.log(f"Gagal menghitung Chamfer Distance: {str(e)}", level="error")
+            from pipeline_tools.geometry_alignment import AlignmentRejected
+            logger.log(f'[GEOMETRI GAGAL] {type(e).__name__}: {e}', level='error')
+            logger.log('Tidak ada skor geometri baru yang diterbitkan. Hasil sukses sebelumnya, jika ada, '
+                       'bukan hasil percobaan ini.', level='error')
+            if isinstance(e, AlignmentRejected):
+                logger.log('[LANGKAH CEK] 1. Pastikan LiDAR dan rekonstruksi merupakan patung/model yang sama. '
+                           '2. Periksa apakah alas, latar, dan cakupan crop sepadan. '
+                           '3. Periksa kandidat overlay di folder diagnostik. '
+                           'Noise atau bentuk yang tidak lengkap juga bisa mengganggu pencarian alignment; '
+                           'log ini belum memastikan penyebabnya.', level='error')
+                logger.log('[KIRIM LOG] Salin mulai [INPUT 1/2] sampai [GEOMETRI GAGAL], '
+                           'beserta diagnostics.json bila tersedia. Tidak perlu mengulang training untuk diagnosis.', level='error')
+            else:
+                import traceback
+                logger.log('[DETAIL TEKNIS]\n' + traceback.format_exc(), level='error')
             logger.end_stage("Evaluasi_Geometri_LiDAR")
             logger.set_parameters({
                 "model_path": args.model_path,

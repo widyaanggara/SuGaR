@@ -25,6 +25,22 @@ Pipeline lengkap berakhir pada evaluasi visual. Evaluasi geometri dijalankan ter
 
 ## Cakupan objek dan keterbatasan
 
+Jika pemeriksaan overlap otomatis menolak kandidat, log menampilkan overlap dua
+arah dan evaluasi tidak menerbitkan skor. Kandidat yang ditolak dan LiDAR dalam
+meter disimpan pada `geometry/alignment_failures/attempt_*/` sebagai
+`rejected_candidate.ply`, `ground_truth_meters.ply`, dan `diagnostics.json`.
+Buka kedua PLY bersama untuk diagnosis; kandidat ini belum merupakan alignment
+yang sah untuk pelaporan skor. Setiap percobaan memakai folder terpisah dan tidak
+menimpa metrik maupun overlay sukses sebelumnya.
+
+Log server memuat `[KONFIGURASI]`, `[INPUT]`, `[UKURAN]`, `[SATUAN]`,
+`[SAMPLING]`, progres `[ALIGN 1/3]` sampai `[ALIGN 3/3]`, dan hasil overlap
+dua arah. `[ALIGN SYARAT]` membedakan ambang penerimaan registrasi dari ambang
+metrik 2/5 cm. Saat gagal, salin log mulai `[INPUT 1/2]` beserta
+`diagnostics.json` jika tersedia untuk diagnosis jarak jauh. Error teknis selain
+penolakan overlap menyertakan traceback; tidak semua kegagalan menghasilkan
+kandidat overlay (misalnya input kosong atau file gagal dibaca).
+
 LiDAR dan rekonstruksi harus mencakup **patung/ROI yang sama**. Rekonstruksi seluruh bangunan tidak dapat langsung dianggap sepadan dengan scan patung saja. Siapkan crop yang konsisten untuk eksperimen; implementasi ini tidak melakukan segmentasi semantik patung otomatis. Jangan mengganti file keluaran Gaussian asli dengan PLY biasa hasil crop: atribut Gaussian diperlukan untuk rendering. Model yang terhalang, sangat tidak lengkap, atau simetris dapat memerlukan penyelarasan manual.
 
 Pencarian otomatis bisa gagal atau menghasilkan orientasi yang salah pada objek simetris. Lolos pemeriksaan overlap numerik **bukan** verifikasi kebenaran semantik. Periksa overlay sebelum melaporkan skor skripsi. Jika pemeriksaan numerik gagal, proses gagal tanpa menerbitkan skor sesi baru; histori sukses sebelumnya dipertahankan.

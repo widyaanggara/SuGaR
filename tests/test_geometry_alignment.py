@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 from scipy.spatial import cKDTree
 from pipeline_tools.geometry_alignment import (automatic_similarity_alignment,
-    checked_points, fit_similarity, transform_points)
+    checked_points, fit_similarity, transform_points, AlignmentRejected)
 
 
 class SimilarityTests(unittest.TestCase):
@@ -83,8 +83,52 @@ class SimilarityTests(unittest.TestCase):
         source = rng.normal(size=(350, 3))
         source /= np.linalg.norm(source, axis=1)[:, None]
         target = rng.normal(size=(350, 3)) * [1, .1, .1]
-        with self.assertRaisesRegex(ValueError, 'Penyelarasan otomatis belum memadai'):
-            automatic_similarity_alignment(source, target, use_features=False)
+        logs = []
+        with self.assertRaisesRegex(AlignmentRejected, 'Penyelarasan otomatis belum memadai') as failure:
+            automatic_similarity_alignment(source, target, use_features=False, log=logs.append)
+        self.assertTrue(any('[ALIGN HASIL]' in line and 'LiDAR -> rekonstruksi' in line for line in logs))
+        self.assertTrue(any('bukan Precision/Recall @2cm' in line for line in logs))
+        diagnostics = failure.exception.diagnostics
+        self.assertLess(min(diagnostics['registration_source_overlap'], diagnostics['registration_target_overlap']), .35)
+        self.assertEqual(diagnostics['status'], 'alignment_rejected')
+        self.assertTrue(np.isfinite(diagnostics['alignment_transform']).all())
+        self.assertNotIn('chamfer_distance_cm', diagnostics)
+
+    def test_rejected_candidate_saved_separately_without_scores(self):
+        path = Path(__file__).resolve().parents[1] / 'pipeline_tools/05_evaluate_comparison.py'
+        spec = importlib.util.spec_from_file_location('rejected_evaluator_test', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        class Cloud:
+            def __init__(self):
+                self.points = np.random.default_rng(12).normal(size=(50, 3))
+            def scale(self, factor, center):
+                self.points *= factor
+            def transform(self, matrix):
+                self.points = transform_points(self.points, matrix)
+        writes = []
+        fake = SimpleNamespace(utility=SimpleNamespace(random=SimpleNamespace(seed=lambda _: None)),
+            io=SimpleNamespace(read_triangle_mesh=lambda _: SimpleNamespace(has_triangles=lambda: False),
+                read_point_cloud=lambda _: Cloud(),
+                write_point_cloud=lambda name, cloud: writes.append(name) or True))
+        error = AlignmentRejected('overlap rejected', {'alignment_transform': np.eye(4).tolist(),
+            'status': 'alignment_rejected'})
+        folder = Path('geometry/alignment_failures/attempt_test')
+        logs = []
+        with patch.object(module, 'o3d', fake, create=True), patch.object(module, 'O3D_AVAILABLE', True), \
+                patch('pipeline_tools.geometry_alignment.automatic_similarity_alignment', side_effect=error), \
+                patch.object(Path, 'mkdir'), patch('tempfile.mkdtemp', return_value=str(folder)), \
+                patch.object(Path, 'write_text') as metadata, \
+                patch.object(module, 'metrics_from_distances') as scoring:
+            with self.assertRaisesRegex(AlignmentRejected, 'Diagnostik kandidat'):
+                module.compute_chamfer_distance('source', 'lidar', auto_align=True,
+                    save_aligned_path='geometry/aligned_reconstruction.ply', log=logs.append)
+        self.assertEqual(writes, [str(folder / 'rejected_candidate.ply'), str(folder / 'ground_truth_meters.ply')])
+        self.assertIn('alignment_rejected', metadata.call_args.args[0])
+        scoring.assert_not_called()
+        self.assertTrue(any('[UKURAN]' in line for line in logs))
+        self.assertTrue(any('[DIAGNOSTIK]' in line and 'CloudCompare' in line for line in logs))
+        self.assertFalse(any('[METRIK]' in line for line in logs))
 
 
 if __name__ == '__main__':

@@ -11,6 +11,13 @@ from scipy.spatial import cKDTree
 from pipeline_tools.geometry_config import ALIGNMENT_VERSION
 
 
+class AlignmentRejected(ValueError):
+    """Rejected candidate retained for inspection, never for scoring."""
+    def __init__(self, message, diagnostics):
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
 def checked_points(points):
     points = np.asarray(points, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 3 or len(points) < 30:
@@ -133,27 +140,36 @@ def _refine(source, target, matrix, target_tree, iterations):
     return matrix
 
 
-def automatic_similarity_alignment(source_points, target_points, use_features=True):
+def automatic_similarity_alignment(source_points, target_points, use_features=True, log=None):
     """Return original-source -> metre-LiDAR transform and alignment diagnostics.
 
     Requires comparable object coverage. A failed overlap check raises instead
     of publishing geometry scores. Passing is a numerical check, not a claim
     that semantic alignment was independently verified.
     """
+    log = log or (lambda message: None)
     source_points, target_points = checked_points(source_points), checked_points(target_points)
     source, source_norm = _normalized(source_points)
     target, target_norm = _normalized(target_points)
     target_tree = cKDTree(target)
     candidates = list(_pca_candidates(source, target))
+    log(f'[ALIGN 1/3] Sampel registrasi: rekonstruksi={len(source):,}, LiDAR={len(target):,}; '
+        f'{len(candidates)} kandidat orientasi awal.')
     if use_features:
+        log('[ALIGN 1/3] Mencari kandidat fitur FPFH/RANSAC...')
         feature = _feature_candidate(source, target)
         if feature is not None and np.isfinite(feature).all():
             candidates.append((feature, 'fpfh_ransac'))
+            log('[ALIGN 1/3] Kandidat FPFH/RANSAC tersedia.')
+        else:
+            log('[ALIGN 1/3] FPFH/RANSAC tidak memberi kandidat valid; lanjut dengan kandidat orientasi awal.')
     results = []
+    log(f'[ALIGN 2/3] Memperbaiki skala, rotasi, dan posisi untuk {len(candidates)} kandidat...')
     for matrix, name in candidates:
         matrix = _refine(source, target, matrix, target_tree, 18)
         results.append((_score(source, target, matrix, target_tree), matrix, name))
     refined = []
+    log('[ALIGN 3/3] Memperbaiki tiga kandidat terbaik dan memeriksa overlap...')
     for _, matrix, name in sorted(results, key=lambda result: result[0])[:3]:
         matrix = _refine(source, target, matrix, target_tree, 100)
         refined.append((_score(source, target, matrix, target_tree), matrix, name))
@@ -163,13 +179,33 @@ def automatic_similarity_alignment(source_points, target_points, use_features=Tr
         raise ValueError('Skala hasil registrasi di luar rentang pencarian; periksa cakupan objek.')
     forward, backward, _, _ = _distances(source, target, matrix, target_tree)
     overlaps = [float(np.mean(d < .08)) for d in (forward, backward)]
-    if min(overlaps) < .35:
-        raise ValueError('Penyelarasan otomatis belum memadai. Periksa cakupan patung/ROI '
-                         'dan lihat model LiDAR serta rekonstruksi; gunakan kalibrasi manual bila perlu.')
     final = np.linalg.inv(target_norm) @ matrix @ source_norm
     scale = float(np.cbrt(np.linalg.det(final[:3, :3])))
     if not np.isfinite(final).all() or scale <= 0:
         raise ValueError('Transformasi otomatis tidak valid.')
+    log(f'[ALIGN HASIL] Kandidat={name}; faktor skala rekonstruksi ke meter={scale:.9g}; '
+        f'overlap rekonstruksi -> LiDAR={overlaps[0]:.2%}; LiDAR -> rekonstruksi={overlaps[1]:.2%}.')
+    log('[ALIGN SYARAT] Kedua overlap harus >=35%; jarak registrasi 0,08 dalam koordinat '
+        f'ternormalisasi (setara {0.08 / target_norm[0, 0] * 100:.3f} cm pada sampel ini). '
+        'Ini pemeriksaan alignment, bukan Precision/Recall @2cm.')
+    if min(overlaps) < .35:
+        diagnostics = {
+            'status': 'alignment_rejected', 'alignment_algorithm': ALIGNMENT_VERSION,
+            'alignment_initialization': name, 'alignment_transform': final.tolist(),
+            'scale_factor_to_meters': scale,
+            'registration_source_overlap': overlaps[0],
+            'registration_target_overlap': overlaps[1],
+            'registration_overlap_threshold': .35, 'registration_distance_normalized': .08,
+            'source_extent_original_units': np.ptp(source_points, axis=0).tolist(),
+            'target_extent_meters': np.ptp(target_points, axis=0).tolist(),
+            'alignment_review': 'rejected_candidate_not_valid_for_scoring',
+        }
+        raise AlignmentRejected(
+            'Penyelarasan otomatis belum memadai: overlap rekonstruksi ke LiDAR '
+            f'{overlaps[0]:.1%}, LiDAR ke rekonstruksi {overlaps[1]:.1%}; '
+            'minimal 35% pada kedua arah (ambang registrasi ternormalisasi 0,08, bukan 2 cm). '
+            'Periksa pasangan objek, cakupan patung/ROI, dan kandidat overlay; skor tidak diterbitkan.',
+            diagnostics)
     return final, {
         'alignment_algorithm': ALIGNMENT_VERSION, 'alignment_initialization': name,
         'scale_factor_to_meters': scale, 'registration_source_overlap': overlaps[0],

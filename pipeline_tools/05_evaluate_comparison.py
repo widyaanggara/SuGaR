@@ -65,7 +65,7 @@ def compute_chamfer_distance(source_pcd_path: str,
                              apply_icp: bool = True,
                              save_aligned_path: str = None,
                              auto_align: bool = False,
-                             lidar_unit: str = 'm', log=None):
+                             lidar_unit: str = 'm', log=None, allow_weak_alignment: bool = False):
     """
     Menghitung Chamfer Distance dan akurasi/kelengkapan geometri (cm)
     terhadap Ground Truth LiDAR dengan penyelarasan ICP otomatis.
@@ -77,6 +77,8 @@ def compute_chamfer_distance(source_pcd_path: str,
         raise ValueError('Skala harus finite dan > 0; max_samples harus positif.')
     if lidar_unit not in LIDAR_UNITS:
         raise ValueError('Satuan LiDAR harus m, cm, atau mm.')
+    if allow_weak_alignment and not auto_align:
+        raise ValueError('Opsi alignment lemah hanya berlaku untuk mode otomatis.')
     if auto_align and not apply_icp:
         raise ValueError('Mode otomatis harus mengaktifkan penyelarasan.')
 
@@ -141,7 +143,8 @@ def compute_chamfer_distance(source_pcd_path: str,
         from pipeline_tools.geometry_alignment import automatic_similarity_alignment, AlignmentRejected
         try:
             transformation, alignment_details = automatic_similarity_alignment(
-                np.asarray(src.points), np.asarray(tgt.points), log=log)
+                np.asarray(src.points), np.asarray(tgt.points), log=log,
+                allow_weak=allow_weak_alignment)
         except AlignmentRejected as error:
             log(f'[ALIGN DITOLAK] {error}')
             if save_aligned_path:
@@ -181,7 +184,9 @@ def compute_chamfer_distance(source_pcd_path: str,
             raise OSError('Gagal menyimpan LiDAR acuan dalam meter.')
 
     # Jarak src -> tgt (Accuracy)
-    log('[METRIK] Alignment diterima; menghitung jarak tetangga terdekat dua arah...'
+    log('[METRIK] Alignment LEMAH (tidak lolos overlap); skor dihitung dengan penanda alignment_passed=false...'
+        if alignment_details.get('alignment_passed') is False
+        else '[METRIK] Alignment diterima; menghitung jarak tetangga terdekat dua arah...'
         if auto_align else '[METRIK] Menghitung jarak tetangga terdekat dua arah; periksa overlay alignment manual.')
     dists_src_to_tgt = np.asarray(src.compute_point_cloud_distance(tgt))
     # Jarak tgt -> src (Completeness)
@@ -212,6 +217,8 @@ def main():
     parser.add_argument('--auto_align', action='store_true', help='Cari skala, rotasi, dan posisi otomatis (Sim(3)).')
     parser.add_argument('--lidar_unit', choices=tuple(LIDAR_UNITS), default='m',
                         help='Satuan koordinat file LiDAR; CLI lama menganggap meter.')
+    parser.add_argument('--allow_weak_alignment', action='store_true',
+                        help='Tetap hitung skor walau overlap registrasi <35%; hasil ditandai alignment_passed=false.')
     parser.add_argument("--no_icp", action="store_true", help="Nonaktifkan registrasi ICP otomatis.")
     parser.add_argument("--psnr", type=float, default=None, help="Nilai PSNR hasil evaluasi visual (dB).")
     parser.add_argument("--ssim", type=float, default=None, help="Nilai SSIM (0-1).")
@@ -249,6 +256,10 @@ def main():
         logger.log('--auto_align tidak boleh digabung --no_icp atau --scale_factor.', level='error')
         logger.finalize(success=False)
         sys.exit(2)
+    if args.allow_weak_alignment and not args.auto_align:
+        logger.log('--allow_weak_alignment hanya berlaku bersama --auto_align.', level='error')
+        logger.finalize(success=False)
+        sys.exit(2)
     if args.gt_lidar and not args.auto_align and args.scale_factor is None:
         logger.log("Pilih --auto_align atau berikan --scale_factor hasil kalibrasi manual.", level="error")
         logger.finalize(success=False)
@@ -277,9 +288,13 @@ def main():
                 apply_icp=not args.no_icp,
                 auto_align=args.auto_align,
                 lidar_unit=args.lidar_unit,
-                save_aligned_path=str(aligned_out), log=logger.log
+                save_aligned_path=str(aligned_out), log=logger.log,
+                allow_weak_alignment=args.allow_weak_alignment
             )
             chamfer_cm = geo_metrics["chamfer_distance_cm"]
+            if geo_metrics.get('alignment_passed') is False:
+                logger.log('[PERINGATAN] Alignment tidak lolos pemeriksaan overlap; skor di bawah ini '
+                           'ditandai alignment_passed=false dan belum valid sebagai hasil akhir.', level='warning')
             logger.log(f"Satuan LiDAR: {args.lidar_unit}; dikonversi ke meter sebelum evaluasi.")
             if args.auto_align:
                 logger.log(f"Skala otomatis rekonstruksi ke meter: {geo_metrics['scale_factor_to_meters']:.10g}; "
@@ -302,6 +317,7 @@ def main():
                 apply_icp=not args.no_icp,
                 geometry_options=dict(lidar_unit=args.lidar_unit,
                     alignment_mode='automatic' if args.auto_align else 'manual',
+                    **({'allow_weak_alignment': True} if args.allow_weak_alignment else {}),
                     **({} if args.auto_align else {'scale_factor': args.scale_factor})))
             geometry_dir = output_base(PROJECT_ROOT, args.experiment) / args.method.replace("-", "").lower() / args.statue_class / args.model_id / 'geometry'
             geometry_dir.mkdir(parents=True, exist_ok=True)

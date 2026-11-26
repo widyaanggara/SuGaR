@@ -559,6 +559,7 @@ function openQueueDialog(cls = '', mdl = '', action = 'full_pipeline') {
   $('queueMethods').value = 'all';
   $('queueApplyIcp').checked = true;
   $('queueAlignment').value = mdl ? cachedStatus[cls]?.[mdl]?.geometry_settings?.alignment_mode || 'automatic' : 'automatic';
+  $('queueAllowWeak').checked = !!(mdl && cachedStatus[cls]?.[mdl]?.geometry_settings?.allow_weak_alignment);
   $('queueDialogError').textContent = '';
   geometryInputs.clear();
   renderQueueTargets();
@@ -702,7 +703,9 @@ function queuePlan() {
         else {
           const saved = info.geometry_resume_settings;
           const mode = $('queueAlignment').value;
+          const weak = mode === 'automatic' && $('queueAllowWeak').checked;
           const sameSettings = saved?.lidar_unit === inputs.unit.value && saved?.alignment_mode === mode
+            && !!saved?.allow_weak_alignment === weak
             && (mode === 'automatic' || Number(saved.scale_factor) === Number(text));
           const icp = mode === 'automatic' || $('queueApplyIcp').checked;
           const experiment = $('queueGeometryExperiment').value || 'baseline';
@@ -760,6 +763,8 @@ function updateQueuePlan() {
   $('queueApplyIcp').disabled = busy;
   if (scaffoldSelected) $('queuePipelineHelp').textContent = 'COLMAP → Scaffold-GS → anchor bersama → keempat metode. Output ablasi disimpan terpisah.';
   $('queueAlignment').disabled = busy;
+  $('queueAllowWeak').disabled = busy;
+  $('queueWeakOption').hidden = manual;
   $('queueClass').disabled = busy;
   $('queueModel').disabled = busy || !queueSelection.class_name;
   $('geometryScaleHeading').hidden = !manual;
@@ -783,6 +788,7 @@ async function persistQueueCalibration() {
     if (!inputs.unit.value || (mode === 'manual' && !text)) return [{class_name: cls, model_id: mdl, clear: true}];
     if (mode === 'manual' && (!Number.isFinite(Number(text)) || Number(text) <= 0)) throw new Error(`Skala ${cls}/${mdl} harus positif.`);
     return [{class_name: cls, model_id: mdl, lidar_unit: inputs.unit.value, alignment_mode: mode,
+      ...(mode === 'automatic' && $('queueAllowWeak').checked ? {allow_weak_alignment: true} : {}),
       ...(mode === 'manual' ? {scale_factor: Number(text)} : {})}];
   });
   if (!entries.some(entry => !entry.clear)) throw new Error('Pilih satuan LiDAR untuk setidaknya satu model.');

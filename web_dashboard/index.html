@@ -613,6 +613,7 @@
         <p>Scan di <code>datasets/&lt;kelas&gt;/&lt;model&gt;/ground_truth/lidar.ply</code>.</p>
         <div class="calibration-scroll" tabindex="0" role="region" aria-label="Satuan LiDAR per model"><table><thead><tr><th>Model &amp; berkas</th><th>Satuan LiDAR</th><th id="geometryScaleHeading">Skala manual (meter/unit)</th></tr></thead><tbody id="geometryCalibrationBody"></tbody></table></div>
         <p id="queueAlignmentNote" class="alignment-note"></p>
+        <label id="queueWeakOption" class="checkbox-label"><input id="queueAllowWeak" type="checkbox" onchange="updateQueuePlan()"><span><strong>Tetap hitung walau alignment lemah</strong><small>Overlap &lt;35% tidak menghentikan evaluasi. Skor ditandai <code>alignment_passed=false</code>; jangan dilaporkan sebagai hasil akhir.</small></span></label>
         <div class="calibration-actions"><button id="queueSaveCalibration" type="button" class="btn btn-ghost btn-sm" onclick="saveQueueCalibration()">Simpan pengaturan LiDAR</button><span class="settings-note" style="margin:0">Disimpan per model, tidak memulai evaluasi.</span></div>
         <label id="queueIcpOption" class="checkbox-label"><input id="queueApplyIcp" type="checkbox" checked><span><strong>Perbaiki posisi &amp; rotasi dengan ICP</strong><small>Matikan jika sudah sejajar dengan LiDAR.</small></span></label>
       </section>

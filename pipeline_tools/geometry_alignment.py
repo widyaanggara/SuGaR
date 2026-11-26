@@ -140,12 +140,14 @@ def _refine(source, target, matrix, target_tree, iterations):
     return matrix
 
 
-def automatic_similarity_alignment(source_points, target_points, use_features=True, log=None):
+def automatic_similarity_alignment(source_points, target_points, use_features=True, log=None,
+                                   allow_weak=False):
     """Return original-source -> metre-LiDAR transform and alignment diagnostics.
 
     Requires comparable object coverage. A failed overlap check raises instead
     of publishing geometry scores. Passing is a numerical check, not a claim
-    that semantic alignment was independently verified.
+    that semantic alignment was independently verified. ``allow_weak`` keeps
+    the best candidate despite a failed overlap check and marks the report.
     """
     log = log or (lambda message: None)
     source_points, target_points = checked_points(source_points), checked_points(target_points)
@@ -188,7 +190,11 @@ def automatic_similarity_alignment(source_points, target_points, use_features=Tr
     log('[ALIGN SYARAT] Kedua overlap harus >=35%; jarak registrasi 0,08 dalam koordinat '
         f'ternormalisasi (setara {0.08 / target_norm[0, 0] * 100:.3f} cm pada sampel ini). '
         'Ini pemeriksaan alignment, bukan Precision/Recall @2cm.')
-    if min(overlaps) < .35:
+    passed = min(overlaps) >= .35
+    if not passed and allow_weak:
+        log('[ALIGN LEMAH] Overlap di bawah 35%, tetapi opsi alignment lemah aktif; skor tetap dihitung '
+            'dan ditandai alignment_passed=false. Skor ini bukan hasil yang lolos pemeriksaan registrasi.')
+    if not passed and not allow_weak:
         diagnostics = {
             'status': 'alignment_rejected', 'alignment_algorithm': ALIGNMENT_VERSION,
             'alignment_initialization': name, 'alignment_transform': final.tolist(),
@@ -213,7 +219,9 @@ def automatic_similarity_alignment(source_points, target_points, use_features=Tr
         'registration_distance_normalized': .08,
         'registration_inlier_rmse_cm': float(np.sqrt(np.mean(forward[forward < .08] ** 2))
                                               / target_norm[0, 0] * 100),
-        'alignment_review': 'automatic_requires_visual_review',
+        'alignment_passed': passed,
+        'alignment_review': ('automatic_requires_visual_review' if passed
+                             else 'weak_alignment_forced_not_validated'),
         'registration_points_source': len(source), 'registration_points_target': len(target),
         'alignment_transform': final.tolist(),
     }

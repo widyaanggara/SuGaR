@@ -21,7 +21,14 @@ def geometry_options(entry):
         raise ValueError('Pilih satuan LiDAR: m, cm, atau mm. Jangan menebak satuan.')
     if not isinstance(mode, str) or mode not in ('automatic', 'manual'):
         raise ValueError('Penyelarasan harus automatic atau manual.')
+    weak = entry.get('allow_weak_alignment', False)
+    if not isinstance(weak, bool):
+        raise ValueError('allow_weak_alignment harus true atau false.')
+    if weak and mode != 'automatic':
+        raise ValueError('Opsi alignment lemah hanya berlaku untuk penyelarasan otomatis.')
     result = dict(lidar_unit=unit, alignment_mode=mode)
+    if weak:
+        result['allow_weak_alignment'] = True
     if mode == 'manual':
         result['scale_factor'] = positive_scale(entry.get('scale_factor'))
     return result

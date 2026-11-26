@@ -243,6 +243,8 @@ def build_command(job, root=PROJECT_ROOT):
             args.extend(['--lidar_unit', options['lidar_unit']])
         if options and options['alignment_mode'] == 'automatic':
             args.append('--auto_align')
+            if options.get('allow_weak_alignment'):
+                args.append('--allow_weak_alignment')
         else:
             args.extend(['--scale_factor', str(job['scale_factor'])])
         if job.get('apply_icp', True) is False:

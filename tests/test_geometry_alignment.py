@@ -94,6 +94,19 @@ class SimilarityTests(unittest.TestCase):
         self.assertTrue(np.isfinite(diagnostics['alignment_transform']).all())
         self.assertNotIn('chamfer_distance_cm', diagnostics)
 
+    def test_weak_alignment_opt_in_returns_flagged_result(self):
+        rng = np.random.default_rng(9)
+        source = rng.normal(size=(350, 3))
+        source /= np.linalg.norm(source, axis=1)[:, None]
+        target = rng.normal(size=(350, 3)) * [1, .1, .1]
+        logs = []
+        matrix, report = automatic_similarity_alignment(source, target, use_features=False,
+                                                        log=logs.append, allow_weak=True)
+        self.assertTrue(np.isfinite(matrix).all())
+        self.assertFalse(report['alignment_passed'])
+        self.assertEqual(report['alignment_review'], 'weak_alignment_forced_not_validated')
+        self.assertTrue(any('[ALIGN LEMAH]' in line for line in logs))
+
     def test_rejected_candidate_saved_separately_without_scores(self):
         path = Path(__file__).resolve().parents[1] / 'pipeline_tools/05_evaluate_comparison.py'
         spec = importlib.util.spec_from_file_location('rejected_evaluator_test', path)

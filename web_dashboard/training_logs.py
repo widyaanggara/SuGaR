@@ -19,5 +19,21 @@ def archived_logs(root, class_name, model_id, method, session=''):
     if session and session not in {p.stem for p in files}:
         raise ValueError('Run log tidak ditemukan untuk patung dan metode ini.')
     selected = next((p for p in files if p.stem == session), files[0] if files else None)
+    content = selected.read_text(encoding='utf-8', errors='replace') if selected else ''
+    source = 'method'
+    # Queue files survive clearing history and contain stdout/stderr from trainers.
+    # Match an exact completed session, not a statue substring or the latest job.
+    if selected:
+        queue_folder = Path(root) / 'outputs/queue/logs'
+        marker = 'SESI SELESAI: ' + selected.stem
+        for path in sorted(queue_folder.glob('*.log'), key=lambda p: p.name, reverse=True):
+            if not path.is_file() or path.resolve().parent != queue_folder.resolve():
+                continue
+            with path.open(encoding='utf-8', errors='replace') as stream:
+                matches = any(line.rstrip().endswith(marker) for line in stream)
+            if matches:
+                content = path.read_text(encoding='utf-8', errors='replace')
+                source = 'queue'
+                break
     return {'runs': runs, 'session': selected.stem if selected else '',
-            'text': selected.read_text(encoding='utf-8', errors='replace') if selected else ''}
+            'source': source, 'text': content}

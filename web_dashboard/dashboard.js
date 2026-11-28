@@ -1212,7 +1212,9 @@ async function loadTrainingLog(session = '') {
     $('trainingLogRun').innerHTML = data.runs.map(run => `<option value="${esc(run.session)}">${esc(run.label)}</option>`).join('');
     $('trainingLogRun').value = data.session;
     $('trainingLogRun').disabled = !data.runs.length;
-    $('trainingLogStatus').textContent = data.runs.length ? 'Arsip per metode | seluruh isi file | terbaru dipilih saat dibuka' : 'Arsip tidak ditemukan';
+    $('trainingLogStatus').textContent = !data.runs.length ? 'Arsip tidak ditemukan' : data.source === 'queue'
+      ? 'Output proses lengkap untuk run ini | dapat mencakup tahap lain dalam pipeline'
+      : 'Log per metode | log proses antrean terkait tidak ditemukan; detail iterasi mungkin tidak tersedia';
     $('trainingLogContent').textContent = data.text || 'Belum ada isi log tersimpan untuk patung dan metode ini.';
     $('trainingLogContent').scrollTop = 0;
   } catch (error) {

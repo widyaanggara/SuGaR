@@ -31,3 +31,18 @@ class TrainingLogArchiveTests(unittest.TestCase):
             self.assertEqual(archived_logs(tmp, 'Dewa', 'model_01', 'SuGaR')['runs'], [])
             with self.assertRaises(ValueError):
                 archived_logs(tmp, '../Dewa', 'model_01', 'SuGaR')
+
+    def test_recovers_training_output_from_deleted_queue_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / 'outputs/logs/training_logs'
+            folder.mkdir(parents=True)
+            session = 'Dewa_model_01_SuGaR_20261128_100000'
+            (folder / (session + '.log')).write_text('Summary only', encoding='utf-8')
+            queue = Path(tmp) / 'outputs/queue/logs'
+            queue.mkdir(parents=True)
+            text = 'Training iteration 7000 loss 0.01\n[INFO] SESI SELESAI: ' + session + '\n'
+            (queue / 'job.log').write_text(text, encoding='utf-8')
+            (queue / 'wrong.log').write_text('SESI SELESAI: ' + session + '_123456', encoding='utf-8')
+            result = archived_logs(tmp, 'Dewa', 'model_01', 'SuGaR')
+            self.assertEqual(result['source'], 'queue')
+            self.assertEqual(result['text'], text)

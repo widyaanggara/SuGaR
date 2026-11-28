@@ -95,3 +95,24 @@ Tes CPU mencakup konversi koordinat/warna, input invalid, reuse dan invalidasi,
 urutan pipeline, penghentian downstream saat gagal, serta isolasi antrean baseline.
 Uji GPU end-to-end satu patung tetap diperlukan di environment Scaffold-GS sebelum
 menjalankan seluruh dataset. Belum ada klaim peningkatan kualitas rekonstruksi.
+
+
+## Pengaturan Scaffold-GS di dashboard
+
+Tab **Scaffold-GS** pada pengaturan eksperimen menyediakan lima parameter:
+iterasi, downscale, ukuran voxel, dimensi fitur anchor, dan offset per anchor.
+Lokasi repo dan Python diisi pada popup antrean **Ablasi Scaffold**.
+Parameter pertumbuhan anchor, densifikasi, pruning, dan loss mengikuti nilai bawaan. Nilai disimpan di browser
+kemudian disalin ke pekerjaan baru ketika memilih **Ablasi Scaffold** pada antrean.
+Perubahan pengaturan tidak mengubah pekerjaan yang sudah masuk antrean.
+
+Parameter tambahan juga tersedia di batch runner dengan awalan `--scaffold_`,
+misalnya `--scaffold_voxel_size 0.002` dan `--scaffold_n_offsets 6`.
+Konfigurasi lengkap dicatat dalam identitas run; perubahan konfigurasi menghasilkan
+run anchor baru. Pekerjaan ablasi masuk antrean untuk pemeriksaan reuse per tahap,
+termasuk ketika hasil metode sebelumnya sudah tersedia. Run lama sebelum penambahan
+identitas konfigurasi ini akan dihitung ulang satu kali.
+
+Jadwal harus memenuhi `start_stat <= update_from < update_until`. Faktor hierarki
+harus menghasilkan voxel pertumbuhan positif pada setiap tingkat. Learning rate
+serta parameter lain yang tidak ditampilkan tetap mengikuti bawaan repository Scaffold.

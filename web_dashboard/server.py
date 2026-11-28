@@ -18,11 +18,13 @@ from pipeline_tools.dataset_registry import (CATALOG, VIDEO_EXTENSIONS, has_chec
 from pipeline_tools.init_dataset_folders import initialize_workspace
 from pipeline_tools.gpu_lock import gpu_lock
 from web_dashboard.job_queue import JobQueue
+from web_dashboard.training_logs import archived_logs
 from web_dashboard.model_cleanup import delete_model_data
 from pipeline_tools.object_region import read_region, save_region, object_arguments
 from pipeline_tools.object_mesh import object_status
 from pipeline_tools.external_methods import METHODS as EXTERNAL_METHODS, trained, visual_metrics, output_base
 from web_dashboard.metrics_export import build_excel
+from pipeline_tools.scaffold_settings import scaffold_settings, scaffold_arguments
 from pipeline_tools.run_settings import (resolution_settings, colmap_settings, colmap_arguments,
     sugar_settings, sugar_arguments, research_presets)
 from pipeline_tools.colmap_capabilities import inspect_colmap
@@ -202,6 +204,7 @@ def build_command(job, root=PROJECT_ROOT):
                          '--scaffold_python', job.get('scaffold_python') or sys.executable,
                          '--scaffold_iterations', str(job.get('scaffold_iterations', 30000)),
                          '--scaffold_resolution', str(job.get('scaffold_resolution', 1))])
+            args.extend(scaffold_arguments(job))
     elif action == "extract_frames":
         videos = media_files(scene / "raw_video", VIDEO_EXTENSIONS)
         if not videos:
@@ -285,7 +288,7 @@ def prepare_jobs(data, root=PROJECT_ROOT):
         if isinstance(resolution, bool) or resolution not in (1, 2, 4, 8):
             raise ValueError('Downscale Scaffold harus 1, 2, 4, atau 8.')
         scaffold = dict(scaffold_repo=str(Path(repo).resolve()), scaffold_python=python,
-                        scaffold_iterations=iterations, scaffold_resolution=resolution)
+                        scaffold_iterations=iterations, scaffold_resolution=resolution, **scaffold_settings(data))
     if action not in {"full_pipeline", "extract_frames", "colmap", "3dgs", "sugar", "sugar_quality", "2dgs", "radegs", "evaluate", "evaluate_visual"}:
         raise ValueError("Tahap pipeline tidak dikenal.")
     quality = None
@@ -405,7 +408,8 @@ def prepare_jobs(data, root=PROJECT_ROOT):
         if action == 'full_pipeline' and pipeline_start == 'existing_colmap' and not has_colmap_model(Path(root) / 'datasets' / cls / mdl):
             skipped.append(f'{cls}/{mdl}: images/ hasil undistorsi dan sparse/0 COLMAP belum lengkap')
             continue
-        if action == 'full_pipeline' and data.get('resume', True) is True:
+        # Scaffold reuse must compare the anchor configuration inside prepare().
+        if action == 'full_pipeline' and experiment == 'baseline' and data.get('resume', True) is True:
             from pipeline_tools.batch_run_all import pipeline_complete
             if pipeline_complete(root, cls, mdl, settings['image_downscale'], settings['image_max_size'],
                                  sugar_settings(data), mesh_export, skip_sugar=skip_sugar,
@@ -504,6 +508,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json(research_presets())
             elif path == "/api/metrics":
                 self.send_json(get_metrics_table(self.root))
+            elif path == '/api/training-logs':
+                query = parse_qs(urlparse(self.path).query)
+                self.send_json(archived_logs(self.root,
+                    query.get('class', [''])[0], query.get('model', [''])[0],
+                    query.get('method', [''])[0], query.get('session', [''])[0]))
             elif path == "/api/metrics.csv":
                 self.send_metrics_csv()
             elif path == "/api/metrics.xlsx":

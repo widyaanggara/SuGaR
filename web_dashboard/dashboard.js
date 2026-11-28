@@ -106,7 +106,7 @@ const actionLabel = action => ({full_pipeline: 'Pipeline lengkap', colmap: 'Reko
   '2dgs': '2DGS + evaluasi', radegs: 'RaDe-GS + evaluasi', '3dgs': 'Training 3DGS', sugar: 'Training SuGaR',
   sugar_quality: 'Optimasi SuGaR', extract_frames: 'Ekstraksi frame',
   evaluate_visual: 'Evaluasi visual', evaluate: 'Evaluasi geometri'}[action] || action || '');
-const settingsTabs = ['resolution', 'colmap', 'dgs', 'sugar', 'training', 'lidar'];
+const settingsTabs = ['resolution', 'colmap', 'scaffold', 'dgs', 'sugar', 'training', 'lidar'];
 const isFilePreview = window.location?.protocol === 'file:' || window.location?.search === '?preview=1';
 const previewMessage = 'Pratinjau desain lokal. Data penelitian dan eksekusi pipeline tersedia melalui dashboard yang berjalan di server.';
 
@@ -216,18 +216,21 @@ async function api(path, data) {
   return result;
 }
 
+const scaffoldControlIds = ['scaffold_voxel_size', 'scaffold_feat_dim', 'scaffold_n_offsets'];
 const settingControls = ['gpuId', 'refinementTime', 'meshTriangles', 'resumeCompleted',
   'colmapMaxImageSize', 'imageDownscale', 'imageMaxSize', 'colmapDevice', 'colmapMatcher',
   'colmapMaxFeatures', 'colmapSequentialOverlap', 'sourceWidth', 'sourceHeight',
   'gaussiansPerTriangle', 'regularization', 'evaluationMethod', 'sugarMeshExport', 'sugarDiagnostics',
   'qualityGaussians', 'qualityIterations', 'qualityPoissonDepth', 'qualityForeground', 'qualityBackground',
-  'qualityStatueFocus', 'qualityStatuePoissonDepth'];
+  'qualityStatueFocus', 'qualityStatuePoissonDepth',
+  'queueScaffoldRepo', 'queueScaffoldPython', 'queueScaffoldIterations', 'queueScaffoldResolution', ...scaffoldControlIds];
 let presets = {};
 const sugarControlIds = {vertices: 'meshTriangles', gaussians_per_triangle: 'gaussiansPerTriangle',
   refinement_time: 'refinementTime', regularization: 'regularization'};
 
 function readExperimentSettings() {
   return {
+    ...Object.fromEntries(scaffoldControlIds.map(id => [id, Number($(id).value)])),
     gpu: Number($('gpuId').value), refinement_time: $('refinementTime').value,
     vertices: Number($('meshTriangles').value), resume: $('resumeCompleted').checked,
     gaussians_per_triangle: Number($('gaussiansPerTriangle').value),
@@ -1042,7 +1045,7 @@ async function copyLogs(elementId = 'termBody') {
       field.value = text;
       field.setAttribute('readonly', '');
       field.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
-      const host = {jobLogContent: 'jobLogDialog', liveLogContent: 'liveLogDialog'}[elementId] ? $({jobLogContent: 'jobLogDialog', liveLogContent: 'liveLogDialog'}[elementId]) : document.body;
+      const host = {jobLogContent: 'jobLogDialog', liveLogContent: 'liveLogDialog', trainingLogContent: 'trainingLogDialog'}[elementId] ? $({jobLogContent: 'jobLogDialog', liveLogContent: 'liveLogDialog', trainingLogContent: 'trainingLogDialog'}[elementId]) : document.body;
       host.appendChild(field);
       try {
         field.select();
@@ -1115,7 +1118,7 @@ function renderMetricFilters() {
 function renderMetrics() {
   const threshold = $('geometryThreshold').value === '5' ? 5 : 2;
   const experimentRows = cachedMetrics.filter(row => metricMethods[metricExperiment].includes(row.Metode))
-    .map(row => ({...row, Metode: row.Metode.replace('_scaffold_anchor', '')}))
+    .map(row => ({...row, logMethod: row.Metode, Metode: row.Metode.replace('_scaffold_anchor', '')}))
     .filter(row => selectedMetricMethods.has(row.Metode));
   renderMetricFilters();
   const filtered = experimentRows;
@@ -1133,8 +1136,8 @@ function renderMetrics() {
   const columns = ['Timestamp', 'Kelas', 'Model ID', 'Metode', 'PSNR (dB)', 'SSIM', 'LPIPS', 'Chamfer Dist (cm)',
     precision, recall, f1, 'Peak VRAM (GB)', 'Total Waktu (Menit)'];
   $('metricsBody').innerHTML = !selectedMetricMethods.size
-    ? '<tr><td colspan="13" class="empty-msg"><strong>Belum ada metode dipilih</strong>Centang minimal satu metode pada filter.</td></tr>'
-    : display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}${row.groupStart ? ' metric-group-start' : ''}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>`).join('') + '</tr>').join('') || '<tr><td colspan="13" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
+    ? '<tr><td colspan="14" class="empty-msg"><strong>Belum ada metode dipilih</strong>Centang minimal satu metode pada filter.</td></tr>'
+    : display.map(row => `<tr class="${row.shadedGroup ? 'metric-group-tinted' : 'metric-group-plain'}${row.groupStart ? ' metric-group-start' : ''}">` + columns.map((column, i) => `<td>${column === 'Model ID' ? modelIdentityHtml(row.Kelas || '', row[column] || '', cachedStatus[row.Kelas]?.[row[column]]?.display_name || row['Nama Model'] || defaultModelName(row[column] || '')) : esc(i < 4 ? row[column] || '-' : fmtN(row[column]))}</td>` ).join('') + `<td><button class="btn btn-ghost btn-sm" onclick="showTrainingLogs(${esc(JSON.stringify(row.Kelas))}, ${esc(JSON.stringify(row['Model ID']))}, ${esc(JSON.stringify(row.logMethod))})">Log</button></td></tr>`).join('') || '<tr><td colspan="14" class="empty-msg"><strong>Belum ada hasil evaluasi</strong>Jalankan evaluasi visual; metrik geometri memerlukan ground truth LiDAR dan kalibrasi skala.</td></tr>';
   for (const [column, target, context, unit, digits, explanation] of [
     ['PSNR (dB)', 'kpiPsnr', 'psnrContext', ' dB', 2, '↑'],
     ['SSIM', 'kpiSsim', 'ssimContext', '', 4, '↑'],
@@ -1186,3 +1189,35 @@ function closeLightbox() { $('lightbox').classList.remove('open'); }
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') { closeLightbox(); closeJobLogs(); }
 });
+
+let trainingLogTarget = null;
+let trainingLogRequest = 0;
+async function showTrainingLogs(cls, model, method) {
+  trainingLogTarget = {cls, model, method};
+  $('trainingLogTitle').textContent = `${modelName(cls, model)} | ${cls}/${model} | ${method}`;
+  $('trainingLogRun').innerHTML = '';
+  if (!$('trainingLogDialog').open) $('trainingLogDialog').showModal();
+  await loadTrainingLog();
+}
+async function loadTrainingLog(session = '') {
+  if (!trainingLogTarget) return;
+  const request = ++trainingLogRequest;
+  const {cls, model, method} = trainingLogTarget;
+  $('trainingLogContent').textContent = 'Memuat log...';
+  $('trainingLogStatus').textContent = 'Memuat...';
+  try {
+    const query = `class=${encodeURIComponent(cls)}&model=${encodeURIComponent(model)}&method=${encodeURIComponent(method)}&session=${encodeURIComponent(session)}`;
+    const data = await api(`/api/training-logs?${query}`);
+    if (request !== trainingLogRequest) return;
+    $('trainingLogRun').innerHTML = data.runs.map(run => `<option value="${esc(run.session)}">${esc(run.label)}</option>`).join('');
+    $('trainingLogRun').value = data.session;
+    $('trainingLogRun').disabled = !data.runs.length;
+    $('trainingLogStatus').textContent = data.runs.length ? 'Arsip per metode | seluruh isi file | terbaru dipilih saat dibuka' : 'Arsip tidak ditemukan';
+    $('trainingLogContent').textContent = data.text || 'Belum ada isi log tersimpan untuk patung dan metode ini.';
+    $('trainingLogContent').scrollTop = 0;
+  } catch (error) {
+    if (request !== trainingLogRequest) return;
+    $('trainingLogStatus').textContent = 'Gagal memuat log';
+    $('trainingLogContent').textContent = error.message;
+  }
+}

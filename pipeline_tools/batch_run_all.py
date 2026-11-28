@@ -13,6 +13,7 @@ from pipeline_tools.dataset_registry import (CATALOG, has_checkpoint, has_colmap
 from pipeline_tools.run_settings import (add_resolution_arguments, resolution_settings,
     training_matches, evaluation_matches, colmap_settings,
     add_colmap_arguments, colmap_arguments, sugar_settings, sugar_arguments)
+from pipeline_tools.scaffold_settings import add_scaffold_arguments, scaffold_settings
 from pipeline_tools.object_region import resolve_region
 from pipeline_tools.check_method_environments import require_training_environment
 
@@ -74,7 +75,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
                          scaffold_python=None, scaffold_iterations=30000, scaffold_resolution=1,
                          include_external=False, python_2dgs=None, python_radegs=None, external_resolution=-1,
                          radegs_profile='yaml', visual_protocol='shared', radegs_mesh_backend='scalable',
-                         sugar_mesh_export='obj', sugar_diagnostics=False, object_region=None):
+                         sugar_mesh_export='obj', sugar_diagnostics=False, object_region=None, scaffold_config=None):
     scene_dir, root = Path(scene_dir), Path(root)
     from pipeline_tools.object_region import validate_region, object_arguments
     object_region = validate_region(object_region)
@@ -143,7 +144,7 @@ def process_single_statue(scene_dir, statue_class, model_id, skip_colmap=False,
         initial_ply = prepare(scene_dir, experiment_root / 'scaffold' / statue_class / model_id,
                               scaffold_repo, python=scaffold_python or sys.executable,
                               iterations=scaffold_iterations, resolution=scaffold_resolution,
-                              gpu=gpu, resume=resume)
+                              gpu=gpu, resume=resume, settings=scaffold_config)
     initial_args = ['--initial_ply', initial_ply] if initial_ply else []
     trained_3dgs = False
     if skip_3dgs:
@@ -216,6 +217,7 @@ def main():
     parser.add_argument('--regularization', choices=('dn_consistency', 'density', 'sdf'), default='dn_consistency')
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument('--experiment', choices=['baseline', 'scaffold_anchor'], default='baseline')
+    add_scaffold_arguments(parser)
     parser.add_argument('--scaffold_repo')
     parser.add_argument('--scaffold_python', default=sys.executable)
     parser.add_argument('--scaffold_iterations', type=int, default=30000)
@@ -260,7 +262,7 @@ def main():
                 gaussians_per_triangle=args.gaussians_per_triangle, regularization=args.regularization,
                 experiment=args.experiment, scaffold_repo=args.scaffold_repo,
                 scaffold_python=args.scaffold_python, scaffold_iterations=args.scaffold_iterations,
-                scaffold_resolution=args.scaffold_resolution, include_external=args.include_external,
+                scaffold_resolution=args.scaffold_resolution, scaffold_config=scaffold_settings(vars(args)), include_external=args.include_external,
                 python_2dgs=args.python_2dgs, python_radegs=args.python_radegs,
                 external_resolution=args.external_resolution, radegs_profile=args.radegs_profile,
                 visual_protocol=args.visual_protocol, radegs_mesh_backend=args.radegs_mesh_backend,

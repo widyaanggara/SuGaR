@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from pipeline_tools.dataset_registry import has_colmap_model, file_signature
 from pipeline_tools.recovery_state import atomic_json, scene_identity, code_identity, fingerprint, StageJournal
 from pipeline_tools.gpu_lock import gpu_lock
+from pipeline_tools.scaffold_settings import scaffold_settings, scaffold_arguments
 
 
 def export_anchors(source, scene, destination):
@@ -52,7 +53,8 @@ def export_anchors(source, scene, destination):
             'offsets_and_view_dependent_attributes_transferred': False}
 
 
-def prepare(scene, output, repo, python=sys.executable, iterations=30000, resolution=1, gpu=0, resume=True):
+def prepare(scene, output, repo, python=sys.executable, iterations=30000, resolution=1, gpu=0, resume=True, settings=None):
+    settings = scaffold_settings(settings or {})
     scene, output, repo = Path(scene).resolve(), Path(output).resolve(), Path(repo).resolve()
     if not has_colmap_model(scene):
         raise ValueError('Complete COLMAP images/ and sparse/0 are required.')
@@ -62,7 +64,7 @@ def prepare(scene, output, repo, python=sys.executable, iterations=30000, resolu
     if iterations < 1 or resolution < 1 or gpu < 0:
         raise ValueError('Invalid Scaffold iterations, resolution, or GPU.')
     identity = {'scene': scene_identity(scene), 'iterations': iterations, 'resolution': resolution,
-                'repo': str(repo), 'python': str(python), 'variant': 'anchors_nearest_colmap_rgb_v1',
+                'repo': str(repo), 'python': str(python), 'variant': 'anchors_nearest_colmap_rgb_v1', 'settings': settings,
                 'code': code_identity(repo, [str(p.relative_to(repo)) for p in repo.rglob('*.py') if '.git' not in p.parts]),
                 'adapter': code_identity(ROOT, ['pipeline_tools/scaffold_init.py', 'pipeline_tools/scaffold_train.py'])}
     run = output / 'runs' / fingerprint(identity)
@@ -75,7 +77,7 @@ def prepare(scene, output, repo, python=sys.executable, iterations=30000, resolu
         run.mkdir(parents=True, exist_ok=True)
         command = [str(python), '-u', str(ROOT / 'pipeline_tools/scaffold_train.py'),
                    '--repo', str(repo), '-s', str(scene), '-m', str(run),
-                   '--iterations', str(iterations), '-r', str(resolution), '--eval']
+                   '--iterations', str(iterations), '-r', str(resolution), '--eval', *scaffold_arguments(settings, upstream=True)]
         env = os.environ.copy()
         env['CUDA_VISIBLE_DEVICES'] = str(gpu)
         started = time.monotonic()

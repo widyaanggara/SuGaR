@@ -59,6 +59,7 @@ function page(localPreview = false) {
     setTimeout() {}, setInterval() {},
     fetch: async (url, options) => {
       calls.push([url, options && options.body ? JSON.parse(options.body) : null]);
+      if (url.startsWith('/api/training-logs?')) return {ok: true, json: async () => ({runs: [{session: 'run1', label: '20261128_100000'}], session: 'run1', text: 'Training 7000/30000\n<raw log>'})};
       if (url.startsWith('/api/jobs/')) return {ok: !failLogs, json: async () => failLogs ? {error: 'Log belum ditemukan'} : jobLogs};
       if (url === '/api/geometry-scales') {
         const scales = {};
@@ -851,7 +852,8 @@ test('evaluation tabs restore two method rows per statue and Excel exports all e
   assert.equal(app.nodes.get('kpiPsnr').textContent, '25.00 dB');
   vm.runInContext("setMetricExperiment('scaffold_anchor')", app.context);
   assert.equal(app.nodes.get('kpiPsnr').textContent, '45.00 dB');
-  assert.doesNotMatch(app.nodes.get('metricsBody').innerHTML, /scaffold_anchor/);
+  assert.doesNotMatch(app.nodes.get('metricsBody').innerHTML.replace(/<[^>]*>/g, ''), /scaffold_anchor/);
+  assert.match(app.nodes.get('metricsBody').innerHTML, /showTrainingLogs.*3DGS_scaffold_anchor/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /3DGS/);
   assert.match(app.nodes.get('metricsBody').innerHTML, /SuGaR/);
   assert.equal((app.nodes.get('metricsBody').innerHTML.match(/<tr /g) || []).length, 2);
@@ -1057,4 +1059,38 @@ test('settings separate 3DGS, SuGaR and shared execution without resetting value
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
   assert.equal(ids.length, new Set(ids).size);
   assert.match(app.nodes.get('dgsResolutionSummary').textContent, /1600 x 900/);
+});
+
+
+test('Scaffold settings tab persists anchor controls and includes them in queue payload', async () => {
+  const app = page();
+  await app.events.DOMContentLoaded();
+  vm.runInContext("switchSettingsTab('scaffold')", app.context);
+  assert.equal(app.nodes.get('pane-scaffold').hidden, false);
+  app.nodes.get('scaffold_voxel_size').value = '0.002';
+  app.nodes.get('scaffold_n_offsets').value = '6';
+  vm.runInContext('updateSettings(false)', app.context);
+  vm.runInContext('initializeSettings()', app.context);
+  assert.equal(app.nodes.get('scaffold_voxel_size').value, '0.002');
+  const values = vm.runInContext('readExperimentSettings()', app.context);
+  assert.equal(values.scaffold_voxel_size, 0.002);
+  assert.equal(values.scaffold_n_offsets, 6);
+  const html = fs.readFileSync('web_dashboard/index.html', 'utf8');
+  const pane = html.split('id="pane-scaffold"')[1].split('id="pane-')[0];
+  assert.match(pane, /id="queueScaffoldIterations"/);
+  assert.doesNotMatch(pane, /id="scaffold_lambda_dssim"/);
+  assert.doesNotMatch(pane, /id="queueScaffoldRepo"/);
+  assert.equal([...pane.matchAll(/<(?:input|select) /g)].length, 5);
+  assert.equal(Object.hasOwn(values, 'scaffold_update_depth'), false);
+});
+
+test('archived training popup works without queue history and preserves raw log text', async () => {
+  const app = page();
+  await vm.runInContext("showTrainingLogs('Dewa', 'model_01', '3DGS_scaffold_anchor')", app.context);
+  assert.equal(app.nodes.get('trainingLogDialog').open, true);
+  assert.equal(app.nodes.get('trainingLogContent').textContent, 'Training 7000/30000\n<raw log>');
+  assert.equal(app.nodes.get('trainingLogRun').value, 'run1');
+  assert.match(app.calls.at(-1)[0], /method=3DGS_scaffold_anchor/);
+  await vm.runInContext("loadTrainingLog('run1')", app.context);
+  assert.match(app.calls.at(-1)[0], /session=run1/);
 });
